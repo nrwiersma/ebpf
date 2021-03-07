@@ -3,9 +3,7 @@
 #include <linux/bpf.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
-#include <bcc/proto.h>
-#include <net/sock.h>
-#include <uapi/linux/ptrace.h>
+#include "bpf_helpers.h"
 
 struct bpf_map_def SEC("maps/count") count_map = {
 	.type = BPF_MAP_TYPE_ARRAY,
