@@ -5,6 +5,7 @@ GO_MODCACHE=$(shell go env GOMODCACHE)
 BPF_BUILD_TAG?=build-bpf
 GO_BUILD_TAG?=build-go
 
+DOCKER_IMAGE?=ebpf:latest
 DOCKER_NOCACHE?=
 DOCKER_QUIET?=-q
 
@@ -34,7 +35,7 @@ clean-bpf:
 
 # Build the commands
 build:
-	@find ./cmd/* -maxdepth 1 -type d -exec go build {} \;
+	@GOOS=linux GOARCH=amd64 find ./cmd/* -maxdepth 1 -type d -exec go build -ldflags="-w -s" {} \;
 .PHONY: build
 
 build-docker: go-build-image
@@ -44,3 +45,7 @@ build-docker: go-build-image
 		-v $(GO_MODCACHE):/go/pkg/mod \
 		$(GO_BUILD_TAG)
 .PHONY: build-docker
+
+image: build-docker
+	@echo "==> Building Docker image"
+	@docker build $(DOCKER_NOCACHE) -t $(DOCKER_IMAGE) .

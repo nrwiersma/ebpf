@@ -11,17 +11,36 @@ import _ "github.com/joho/godotenv/autoload"
 
 var version = "¯\\_(ツ)_/¯"
 
+const (
+	flagAddr = "addr"
+
+	flagURI = "uri"
+)
+
 var commands = []*cli.Command{
 	{
 		Name:   "server",
 		Usage:  "Run the server",
-		Flags:  []cli.Flag{},
+		Flags:  []cli.Flag{
+			&cli.StringFlag{
+				Name:    flagAddr,
+				Usage:   "Address to listen to",
+				EnvVars: []string{"ADDR"},
+				Value:   ":80",
+			},
+		},
 		Action: runServer,
 	},
 	{
 		Name:   "client",
 		Usage:  "Run the client",
-		Flags:  []cli.Flag{},
+		Flags:  []cli.Flag{
+			&cli.StringFlag{
+				Name:    flagURI,
+				Usage:   "URI to connect to",
+				EnvVars: []string{"URI"},
+			},
+		},
 		Action: runClient,
 	},
 }
