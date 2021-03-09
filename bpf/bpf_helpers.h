@@ -1,12 +1,10 @@
 #ifndef __BPF_HELPERS_H
 #define __BPF_HELPERS_H
-
 /* helper macro to place programs, maps, license in
  * different sections in elf_bpf file. Section names
  * are interpreted by elf_bpf loader
  */
 #define SEC(NAME) __attribute__((section(NAME), used))
-
 /* helper functions called from eBPF programs written in C */
 static void *(*bpf_map_lookup_elem)(void *map, void *key) =
 	(void *) BPF_FUNC_map_lookup_elem;
@@ -57,7 +55,6 @@ static int (*bpf_skb_set_tunnel_key)(void *ctx, void *key, int size, int flags) 
 //	(void *) BPF_FUNC_skb_set_tunnel_opt;
 static unsigned long long (*bpf_get_prandom_u32)(void) =
 	(void *) BPF_FUNC_get_prandom_u32;
-
 /* llvm builtin functions that eBPF C program may use to
  * emit BPF_LD_ABS and BPF_LD_IND instructions
  */
@@ -68,29 +65,19 @@ unsigned long long load_half(void *skb,
 			     unsigned long long off) asm("llvm.bpf.load.half");
 unsigned long long load_word(void *skb,
 			     unsigned long long off) asm("llvm.bpf.load.word");
-
 /* a helper structure used by eBPF C program
  * to describe map attributes to elf_bpf loader
  */
 #define BUF_SIZE_MAP_NS 256
-
-typedef struct bpf_map_def {
-	unsigned int type;
-	unsigned int key_size;
-	unsigned int value_size;
-	unsigned int max_entries;
-	unsigned int map_flags;
-	unsigned int pinning;
-	char namespace[BUF_SIZE_MAP_NS];
-} bpf_map_def;
-
-enum bpf_pin_type {
-	PIN_NONE = 0,
-	PIN_OBJECT_NS,
-	PIN_GLOBAL_NS,
-	PIN_CUSTOM_NS,
+struct bpf_map_def {
+  unsigned int type;
+  unsigned int key_size;
+  unsigned int value_size;
+  unsigned int max_entries;
+  unsigned int map_flags;
+  unsigned int pinning;
+  char namespace[BUF_SIZE_MAP_NS];
 };
-
 static int (*bpf_skb_load_bytes)(void *ctx, int off, void *to, int len) =
 	(void *) BPF_FUNC_skb_load_bytes;
 static int (*bpf_skb_store_bytes)(void *ctx, int off, void *from, int len, int flags) =
@@ -103,9 +90,7 @@ static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
 	(void *) BPF_FUNC_skb_under_cgroup;
 //static int (*bpf_skb_change_head)(void *, int len, int flags) =
 //	(void *) BPF_FUNC_skb_change_head;
-
 #if defined(__x86_64__)
-
 #define PT_REGS_PARM1(x) ((x)->di)
 #define PT_REGS_PARM2(x) ((x)->si)
 #define PT_REGS_PARM3(x) ((x)->dx)
@@ -116,9 +101,7 @@ static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
 #define PT_REGS_RC(x) ((x)->ax)
 #define PT_REGS_SP(x) ((x)->sp)
 #define PT_REGS_IP(x) ((x)->ip)
-
 #elif defined(__s390x__)
-
 #define PT_REGS_PARM1(x) ((x)->gprs[2])
 #define PT_REGS_PARM2(x) ((x)->gprs[3])
 #define PT_REGS_PARM3(x) ((x)->gprs[4])
@@ -129,9 +112,7 @@ static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
 #define PT_REGS_RC(x) ((x)->gprs[2])
 #define PT_REGS_SP(x) ((x)->gprs[15])
 #define PT_REGS_IP(x) ((x)->ip)
-
 #elif defined(__aarch64__)
-
 #define PT_REGS_PARM1(x) ((x)->regs[0])
 #define PT_REGS_PARM2(x) ((x)->regs[1])
 #define PT_REGS_PARM3(x) ((x)->regs[2])
@@ -142,9 +123,7 @@ static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
 #define PT_REGS_RC(x) ((x)->regs[0])
 #define PT_REGS_SP(x) ((x)->sp)
 #define PT_REGS_IP(x) ((x)->pc)
-
 #elif defined(__powerpc__)
-
 #define PT_REGS_PARM1(x) ((x)->gpr[3])
 #define PT_REGS_PARM2(x) ((x)->gpr[4])
 #define PT_REGS_PARM3(x) ((x)->gpr[5])
@@ -153,9 +132,7 @@ static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
 #define PT_REGS_RC(x) ((x)->gpr[3])
 #define PT_REGS_SP(x) ((x)->sp)
 #define PT_REGS_IP(x) ((x)->nip)
-
 #endif
-
 #ifdef __powerpc__
 #define BPF_KPROBE_READ_RET_IP(ip, ctx)		({ (ip) = (ctx)->link; })
 #define BPF_KRETPROBE_READ_RET_IP		BPF_KPROBE_READ_RET_IP
@@ -166,5 +143,4 @@ static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
 		bpf_probe_read(&(ip), sizeof(ip),				\
 				(void *)(PT_REGS_FP(ctx) + sizeof(ip))); })
 #endif
-
 #endif
