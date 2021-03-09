@@ -135,15 +135,19 @@ func (a *App) watchContainer(id string) {
 
 	fmt.Printf("found container cgroup %s\n", path)
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
+	attached := false
 	for prog := range a.mod.IterCgroupProgram() {
 		fmt.Printf("attaching prog %s\n", prog.Name)
 
 		if err = elf.AttachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
 			fmt.Println("attach", err)
+			continue
 		}
+		attached = true
+	}
+
+	if !attached {
+		return
 	}
 
 	fmt.Printf("attached container %s\n", id)
