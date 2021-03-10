@@ -2,18 +2,14 @@ package ebpf
 
 import (
 	"bytes"
-	"context"
 	_ "embed"
 	"fmt"
-	"log"
-	"os"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/docker/docker/api/types"
-	docker "github.com/docker/docker/client"
 	"github.com/iovisor/gobpf/elf"
+	"github.com/nrwiersma/ebpf/pkg/k8s"
 )
 
 import "C"
@@ -22,8 +18,7 @@ import "C"
 var bpf []byte
 
 type App struct {
-	mod    *elf.Module
-	client *docker.Client
+	mod *elf.Module
 
 	mu      sync.Mutex
 	cgroups map[string]string
@@ -39,14 +34,8 @@ func NewApp() (*App, error) {
 		return nil, fmt.Errorf("unable to load module: %w", err)
 	}
 
-	client, err := docker.NewClientWithOpts(docker.FromEnv, docker.WithAPIVersionNegotiation())
-	if err != nil {
-		return nil, fmt.Errorf("unable to connect to docker: %w", err)
-	}
-
 	app := &App{
 		mod:     mod,
-		client:  client,
 		cgroups: map[string]string{},
 	}
 
@@ -58,32 +47,27 @@ func NewApp() (*App, error) {
 }
 
 func (a *App) watchContainers() {
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
+	events := make(chan k8s.Event, 100)
+	defer close(events)
 
-	for {
-		select {
-		case <-a.doneCh:
-			return
-		case <-tick.C:
-		}
+	if err := k8s.WatchPodEvents(events, a.doneCh); err != nil {
+		fmt.Printf("Cannot watch for pods: %v", err)
+	}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		containers, err := a.client.ContainerList(ctx, types.ContainerListOptions{})
-		cancel()
-		if err != nil {
-			log.Println(err)
+	for event := range events {
+		if event.Namespace != "app" {
+			fmt.Printf("Ignoring pod %s\n", event.FullName)
 			continue
 		}
 
-		a.mu.Lock()
-		for _, ctr := range containers {
-			id := ctr.ID
-			if _, ok := a.cgroups[id]; ok {
-				continue
-			}
+		path := k8s.GetCGroupPath(event.PodUID, event.PodQOSClass)
 
-			a.watchContainer(id)
+		a.mu.Lock()
+		switch event.Type {
+		case k8s.NewPodEvent:
+			a.attachPod(event.FullName, path)
+		case k8s.DeletePodEvent:
+			a.detachPod(event.FullName)
 		}
 		a.mu.Unlock()
 	}
@@ -118,28 +102,16 @@ func (a *App) watchMap() {
 	}
 }
 
-func (a *App) watchContainer(id string) {
-	defer func() {
-		if v := recover(); v != nil {
-			fmt.Printf("recovered from panic: %v\n", v)
-		}
-	}()
-
-	fmt.Printf("attaching container %s\n", id)
-
-	path, err := a.findCgroupPath(id)
-	if err != nil {
-		fmt.Println("find cgroup path", err)
+func (a *App) attachPod(name, path string) {
+	if _, ok := a.cgroups[name]; ok {
 		return
 	}
 
-	fmt.Printf("found container cgroup %s\n", path)
+	fmt.Printf("attaching pod %s\n", name)
 
 	attached := false
 	for prog := range a.mod.IterCgroupProgram() {
-		fmt.Printf("attaching prog %s\n", prog.Name)
-
-		if err = elf.AttachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
+		if err := elf.AttachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
 			fmt.Println("attach", err)
 			continue
 		}
@@ -150,43 +122,32 @@ func (a *App) watchContainer(id string) {
 		return
 	}
 
-	fmt.Printf("attached container %s\n", id)
+	fmt.Printf("attached pod %s\n", name)
 
-	a.cgroups[id] = path
+	a.cgroups[name] = path
 }
 
-var cgroupPaths = []string{
-	"/sys/fs/cgroup/memory/docker/%s/",
-	"/sys/fs/cgroup/memory/system.slice/docker-%s.scope/",
-	"/sys/fs/cgroup/docker/%s/",
-	"/sys/fs/cgroup/system.slice/docker-%s.scope/",
-}
-
-func (a *App) findCgroupPath(id string) (string, error) {
-	for _, p := range cgroupPaths {
-		path := fmt.Sprintf(p, id)
-
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		return path, nil
+func (a *App) detachPod(name string) {
+	if _, ok := a.cgroups[name]; !ok {
+		return
 	}
 
-	return "", os.ErrNotExist
+	path := a.cgroups[name]
+	for prog := range a.mod.IterCgroupProgram() {
+		if err := elf.DetachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
+			fmt.Println("detach", err)
+		}
+	}
 }
 
 func (a *App) Close() error {
 	close(a.doneCh)
 
-	for prog := range a.mod.IterCgroupProgram() {
-		for id, path := range a.cgroups {
-			if err := elf.DetachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
-				fmt.Println("detach", err)
-			}
-
-			fmt.Printf("detached container %s\n", id)
-		}
+	a.mu.Lock()
+	for name := range a.cgroups {
+		a.detachPod(name)
 	}
+	a.mu.Unlock()
 
 	if err := a.mod.Close(); err != nil {
 		return err

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,7 +28,13 @@ func runClient(c *cli.Context) error {
 			case <-tick.C:
 			}
 
-			_, _ = http.Post(uri, "text/plain", bytes.NewReader([]byte("test")))
+			res, err := http.Post(uri, "text/plain", bytes.NewReader([]byte("test")))
+			if err != nil {
+				fmt.Println("Error", err)
+			}
+			if res.StatusCode != 200 {
+				fmt.Println("could not send request")
+			}
 		}
 	}()
 
