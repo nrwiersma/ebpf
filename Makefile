@@ -35,12 +35,12 @@ clean-bpf:
 
 # Build the commands
 build:
-	@GOOS=linux GOARCH=amd64 find ./cmd/* -maxdepth 1 -type d -exec go build -ldflags="-w -s" {} \;
+	@CGO_ENABLED=1 GOOS=linux GOARCH=amd64 find ./cmd/* -maxdepth 1 -type d -exec go build -ldflags="-w -s" {} \;
 .PHONY: build
 
 build-docker: go-build-image
 	@echo "==> Building Go binaries"
-	@CGO_ENABLED=1 docker run --rm -it \
+	@docker run --rm -it \
 		-v $(PWD):/app \
 		-v $(GO_MODCACHE):/go/pkg/mod \
 		$(GO_BUILD_TAG)
@@ -49,3 +49,11 @@ build-docker: go-build-image
 image: build-docker
 	@echo "==> Building Docker image"
 	@docker build $(DOCKER_NOCACHE) -t $(DOCKER_IMAGE) .
+.PHONY: image
+
+push-image:
+	@echo "==> Pushing Docker image"
+	@docker tag ebpf:latest media-server.wiersma.lan/ebpf:latest
+	@docker push media-server.wiersma.lan/ebpf:latest
+	@docker rmi media-server.wiersma.lan/ebpf:latest
+.PHONY: push-image

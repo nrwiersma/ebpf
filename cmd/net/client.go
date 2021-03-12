@@ -32,8 +32,12 @@ func runClient(c *cli.Context) error {
 			if err != nil {
 				fmt.Println("Error", err)
 			}
+			_ = res.Body.Close()
+
 			if res.StatusCode != 200 {
 				fmt.Println("could not send request")
+			} else {
+				fmt.Println("sent request")
 			}
 		}
 	}()

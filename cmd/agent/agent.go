@@ -6,6 +6,7 @@ import (
 	"os/signal"
 
 	"github.com/nrwiersma/ebpf"
+	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
 )
@@ -19,6 +20,10 @@ func runAgent(c *cli.Context) error {
 		Max: unix.RLIM_INFINITY,
 	}
 	_ = unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
+
+	if err := cgroups.EnsureCgroupFS(""); err != nil {
+		return err
+	}
 
 	app, err := ebpf.NewApp()
 	if err != nil {

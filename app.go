@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/iovisor/gobpf/elf"
+	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/nrwiersma/ebpf/pkg/k8s"
 )
 
@@ -60,7 +61,7 @@ func (a *App) watchContainers() {
 			continue
 		}
 
-		path := k8s.GetCGroupPath(event.PodUID, event.PodQOSClass)
+		path := k8s.GetCGroupPath(cgroups.CgroupRoot(), event.PodUID, event.PodQOSClass)
 
 		a.mu.Lock()
 		switch event.Type {
@@ -76,13 +77,20 @@ func (a *App) watchContainers() {
 func (a *App) watchMap() {
 	mp := a.mod.Map("count")
 
-	packets_key := 0
-	bytes_key := 1
+	zero := 0
+	packets_key := uint32(0)
+	bytes_key := uint32(1)
+
+	if err := a.updateMap(mp, packets_key, 0); err != nil {
+		fmt.Printf("error updating map: %v\n", err)
+	}
+	if err := a.updateMap(mp, bytes_key, 0); err != nil {
+		fmt.Printf("error updating map: %v\n", err)
+	}
 
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 
-	var packets, bytes uint64
 	for {
 		select {
 		case <-a.doneCh:
@@ -90,16 +98,30 @@ func (a *App) watchMap() {
 		case <-tick.C:
 		}
 
-		if err := a.mod.LookupElement(mp, unsafe.Pointer(&packets_key), unsafe.Pointer(&packets)); err != nil {
+		packets, err := a.lookupMap(mp, packets_key)
+		if err != nil {
 			fmt.Printf("error looking up in map: %v\n", err)
 		}
 
-		if err := a.mod.LookupElement(mp, unsafe.Pointer(&bytes_key), unsafe.Pointer(&bytes)); err != nil {
+		bytes, err := a.lookupMap(mp, packets_key)
+		if err != nil {
 			fmt.Printf("error looking up in map: %v\n", err)
 		}
 
 		fmt.Println("cgroup received", packets, "packets and", bytes, "bytes")
 	}
+}
+
+func (a *App) updateMap(mp *elf.Map, key uint32, value uint64) error {
+	return a.mod.UpdateElement(mp, unsafe.Pointer(&key), unsafe.Pointer(&value), 0)
+}
+
+func (a *App) lookupMap(mp *elf.Map, key uint32) (uint64, error) {
+	var value uint64
+	if err := a.mod.LookupElement(mp, unsafe.Pointer(&key), unsafe.Pointer(&value)); err != nil {
+		return 0, err
+	}
+	return value, nil
 }
 
 func (a *App) attachPod(name, path string) {

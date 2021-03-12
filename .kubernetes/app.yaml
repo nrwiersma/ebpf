@@ -21,8 +21,8 @@ spec:
     spec:
       containers:
         - name: server
-          image: ebpf:latest
-          imagePullPolicy: IfNotPresent
+          image: media-server.wiersma.lan/ebpf:latest
+          imagePullPolicy: Always
           command:
             - "/net"
             - "server"
@@ -59,8 +59,8 @@ spec:
     spec:
       containers:
         - name: server
-          image: ebpf:latest
-          imagePullPolicy: IfNotPresent
+          image: media-server.wiersma.lan/ebpf:latest
+          imagePullPolicy: Always
           command:
             - "/net"
             - "client"

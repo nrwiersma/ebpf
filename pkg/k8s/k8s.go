@@ -12,8 +12,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-const DefaultCgroupRoot string = "/sys/fs/cgroup/systemd/kubepods"
-
 type EventType int
 
 const (
@@ -104,6 +102,6 @@ func onDelete(events chan Event) func(obj interface{}) {
 	}
 }
 
-func GetCGroupPath(uid, qosClass string) string {
-	return fmt.Sprintf("%s/%s/pod%s", DefaultCgroupRoot, strings.ToLower(qosClass), uid)
+func GetCGroupPath(root, uid, qosClass string) string {
+	return fmt.Sprintf("%s/kubepods/%s/pod%s", root, strings.ToLower(qosClass), uid)
 }

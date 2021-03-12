@@ -59,8 +59,8 @@ spec:
     spec:
       serviceAccountName: "ebpf-svc-acc"
       containers:
-        - image: ebpf:latest
-          imagePullPolicy: IfNotPresent
+        - image: media-server.wiersma.lan/ebpf:latest
+          imagePullPolicy: Always
           name: agent
           command:
             - "/agent"
