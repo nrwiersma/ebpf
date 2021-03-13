@@ -65,6 +65,15 @@ unsigned long long load_half(void *skb,
 			     unsigned long long off) asm("llvm.bpf.load.half");
 unsigned long long load_word(void *skb,
 			     unsigned long long off) asm("llvm.bpf.load.word");
+static inline __attribute__((always_inline))
+__u16 bpf_ntohs(__u16 val) {
+  /* will be recognized by gcc into rotate insn and eventually rolw 8 */
+  return (val << 8) | (val >> 8);
+}
+static inline __attribute__((always_inline))
+__u16 bpf_htons(__u16 val) {
+  return bpf_ntohs(val);
+}
 /* a helper structure used by eBPF C program
  * to describe map attributes to elf_bpf loader
  */

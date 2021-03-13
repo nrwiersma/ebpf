@@ -77,11 +77,14 @@ func (a *App) watchContainers() {
 func (a *App) watchMap() {
 	mp := a.mod.Map("count")
 
-	zero := 0
 	packets_key := uint32(0)
-	bytes_key := uint32(1)
+	syn_key := uint32(1)
+	bytes_key := uint32(3)
 
 	if err := a.updateMap(mp, packets_key, 0); err != nil {
+		fmt.Printf("error updating map: %v\n", err)
+	}
+	if err := a.updateMap(mp, syn_key, 0); err != nil {
 		fmt.Printf("error updating map: %v\n", err)
 	}
 	if err := a.updateMap(mp, bytes_key, 0); err != nil {
@@ -103,12 +106,17 @@ func (a *App) watchMap() {
 			fmt.Printf("error looking up in map: %v\n", err)
 		}
 
+		syn, err := a.lookupMap(mp, syn_key)
+		if err != nil {
+			fmt.Printf("error looking up in map: %v\n", err)
+		}
+
 		bytes, err := a.lookupMap(mp, packets_key)
 		if err != nil {
 			fmt.Printf("error looking up in map: %v\n", err)
 		}
 
-		fmt.Println("cgroup received", packets, "packets and", bytes, "bytes")
+		fmt.Println("cgroup received", packets, "packets and", syn, "syns and", bytes, "bytes")
 	}
 }
 

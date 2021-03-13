@@ -24,8 +24,14 @@ go-build-image:
 # Build eBPF elf modules
 build-bpf: bpf-build-image clean-bpf
 	@echo "==> Building eBPF elf"
-	@docker run --rm -it -v $(PWD)/bpf:/src $(BPF_BUILD_TAG)
+	@docker run --rm -it -v $(PWD)/bpf:/src $(BPF_BUILD_TAG) build
 .PHONY: build-bpf
+
+# Build eBPF elf modules
+build-bpf-asm: bpf-build-image clean-bpf
+	@echo "==> Building/Dumping eBPF elf"
+	@docker run --rm -it -v $(PWD)/bpf:/src $(BPF_BUILD_TAG) dump
+.PHONY: build-bpf-asm
 
 # Clean eBPF elf modules
 clean-bpf:
