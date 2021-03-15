@@ -3,6 +3,7 @@ package ebpf
 import (
 	"bytes"
 	_ "embed"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -11,12 +12,43 @@ import (
 	"github.com/iovisor/gobpf/elf"
 	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/nrwiersma/ebpf/pkg/k8s"
+	"inet.af/netaddr"
 )
 
 import "C"
 
+/*
+#include <linux/bpf.h>
+#include "bpf/metrics.h"
+*/
+import "C"
+
 //go:embed bpf/dist/metrics.o
 var bpf []byte
+
+type event struct {
+	Timestamp uint64
+	SrcIP     netaddr.IP
+	DestIP    netaddr.IP
+	SrcPort   uint16
+	DestPort  uint16
+	DataLen   uint32
+}
+
+func eventToGo(data *[]byte) event {
+	var evnt event
+
+	eventC := (*C.struct_event_t)(unsafe.Pointer(&(*data)[0]))
+
+	evnt.Timestamp = uint64(eventC.ts)
+	evnt.SrcIP = toIP(uint32(eventC.src_ip))
+	evnt.DestIP = toIP(uint32(eventC.dest_ip))
+	evnt.SrcPort = uint16(eventC.src_port)
+	evnt.DestPort = uint16(eventC.dest_port)
+	evnt.DataLen = uint32(eventC.len)
+
+	return evnt
+}
 
 type App struct {
 	mod *elf.Module
@@ -42,7 +74,8 @@ func NewApp() (*App, error) {
 
 	go app.watchContainers()
 
-	go app.watchMap()
+	go app.watchTable()
+	//go app.watchMap()
 
 	return app, nil
 }
@@ -74,17 +107,62 @@ func (a *App) watchContainers() {
 	}
 }
 
+func (a *App) watchTable() {
+	eventsCh := make(chan []byte)
+	lostCh := make(chan uint64)
+	defer func() {
+		close(eventsCh)
+		close(lostCh)
+	}()
+
+	mp, err := elf.InitPerfMap(a.mod, "events", eventsCh, lostCh)
+	if err != nil {
+		fmt.Printf("error loading perf map: %v\n", err)
+	}
+	mp.SetTimestampFunc(func(data *[]byte) uint64 {
+		eventC := (*C.struct_event_t)(unsafe.Pointer(&(*data)[0]))
+		return uint64(eventC.ts) + 100000 // Delay data a little so not out of order.
+	})
+
+	mp.PollStart()
+	defer mp.PollStop()
+
+	for {
+		select {
+		case <-a.doneCh:
+			return
+		case data, ok := <-eventsCh:
+			if !ok {
+				return
+			}
+
+			evnt := eventToGo(&data)
+			fmt.Printf("EVENT: %+v\n", evnt)
+		case lost, ok := <-lostCh:
+			if !ok {
+				return
+			}
+
+			fmt.Println("LOST: ", lost)
+		}
+	}
+}
+
 func (a *App) watchMap() {
 	mp := a.mod.Map("count")
 
 	packets_key := uint32(0)
 	syn_key := uint32(1)
+	ack_key := uint32(2)
 	bytes_key := uint32(3)
 
 	if err := a.updateMap(mp, packets_key, 0); err != nil {
 		fmt.Printf("error updating map: %v\n", err)
 	}
 	if err := a.updateMap(mp, syn_key, 0); err != nil {
+		fmt.Printf("error updating map: %v\n", err)
+	}
+	if err := a.updateMap(mp, ack_key, 0); err != nil {
 		fmt.Printf("error updating map: %v\n", err)
 	}
 	if err := a.updateMap(mp, bytes_key, 0); err != nil {
@@ -111,12 +189,17 @@ func (a *App) watchMap() {
 			fmt.Printf("error looking up in map: %v\n", err)
 		}
 
+		ack, err := a.lookupMap(mp, ack_key)
+		if err != nil {
+			fmt.Printf("error looking up in map: %v\n", err)
+		}
+
 		bytes, err := a.lookupMap(mp, packets_key)
 		if err != nil {
 			fmt.Printf("error looking up in map: %v\n", err)
 		}
 
-		fmt.Println("cgroup received", packets, "packets and", syn, "syns and", bytes, "bytes")
+		fmt.Println("cgroup received", packets, "packets and", syn, "syns and", ack, "acks and", bytes, "bytes")
 	}
 }
 
@@ -184,4 +267,10 @@ func (a *App) Close() error {
 	}
 
 	return nil
+}
+
+func toIP(raw uint32) netaddr.IP {
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], raw)
+	return netaddr.IPv4(b[0], b[1], b[2], b[3])
 }

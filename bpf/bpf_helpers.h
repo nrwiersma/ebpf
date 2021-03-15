@@ -1,5 +1,6 @@
 #ifndef __BPF_HELPERS_H
 #define __BPF_HELPERS_H
+
 /* helper macro to place programs, maps, license in
  * different sections in elf_bpf file. Section names
  * are interpreted by elf_bpf loader
@@ -55,6 +56,7 @@ static int (*bpf_skb_set_tunnel_key)(void *ctx, void *key, int size, int flags) 
 //	(void *) BPF_FUNC_skb_set_tunnel_opt;
 static unsigned long long (*bpf_get_prandom_u32)(void) =
 	(void *) BPF_FUNC_get_prandom_u32;
+
 /* llvm builtin functions that eBPF C program may use to
  * emit BPF_LD_ABS and BPF_LD_IND instructions
  */
@@ -65,15 +67,6 @@ unsigned long long load_half(void *skb,
 			     unsigned long long off) asm("llvm.bpf.load.half");
 unsigned long long load_word(void *skb,
 			     unsigned long long off) asm("llvm.bpf.load.word");
-static inline __attribute__((always_inline))
-__u16 bpf_ntohs(__u16 val) {
-  /* will be recognized by gcc into rotate insn and eventually rolw 8 */
-  return (val << 8) | (val >> 8);
-}
-static inline __attribute__((always_inline))
-__u16 bpf_htons(__u16 val) {
-  return bpf_ntohs(val);
-}
 /* a helper structure used by eBPF C program
  * to describe map attributes to elf_bpf loader
  */
@@ -99,6 +92,8 @@ static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
 	(void *) BPF_FUNC_skb_under_cgroup;
 //static int (*bpf_skb_change_head)(void *, int len, int flags) =
 //	(void *) BPF_FUNC_skb_change_head;
+static int (*bpf_skb_pull_data)(void *, int len) =
+	(void *) BPF_FUNC_skb_pull_data;
 #if defined(__x86_64__)
 #define PT_REGS_PARM1(x) ((x)->di)
 #define PT_REGS_PARM2(x) ((x)->si)
