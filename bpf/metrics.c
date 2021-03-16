@@ -24,13 +24,6 @@ struct bpf_map_def SEC("maps/events") events = {
     .max_entries = 1024 * 64,
 };
 
-struct bpf_map_def SEC("maps/count") count_map = {
-	.type = BPF_MAP_TYPE_ARRAY,
-    .key_size = sizeof(int),
-    .value_size = sizeof(__u64),
-    .max_entries = 1024,
-};
-
 SEC("cgroup/skb")
 int metrics(struct __sk_buff *skb)
 {
@@ -66,55 +59,25 @@ int metrics(struct __sk_buff *skb)
     if (data + sizeof(*tcp) > data_end)
         return KEEP;
 
-    // TODO: handle udp
     tcp = data;
 
     event.src_port = __constant_ntohs(tcp->source);
     event.dest_port = __constant_ntohs(tcp->dest);
-//    if (tcp->syn) {
-//        int key = SYN_KEY;
-//        __u64 *val = 0;
-//
-//        val = bpf_map_lookup_elem(&count_map, &key);
-//        if (val == 0)
-//            return DROP;
-//
-//        *val += 1;
-//    }
-//    if (tcp->ack) {
-//        int key = ACK_KEY;
-//        __u64 *val = 0;
-//
-//        val = bpf_map_lookup_elem(&count_map, &key);
-//        if (val == 0)
-//            return DROP;
-//
-//        *val += 1;
-//    }
+    event.seq = __constant_ntohl(tcp->seq);
+    event.ack_seq = __constant_ntohl(tcp->ack_seq);
+    event.flags = 0;
+    if (tcp->syn)
+        event.flags += 1;
+    if (tcp->ack)
+        event.flags += 2;
+    if (tcp->fin)
+        event.flags += 4;
 
     hdrlen = tcp->doff << 2;
     len -= hdrlen;
 
     event.len = len;
     bpf_perf_event_output(skb, &events, 0 /* flags */, &event, sizeof(event));
-
-//    int packets_key = PACKETS_KEY;
-//    __u64 *packets = 0;
-//
-//    packets = bpf_map_lookup_elem(&count_map, &packets_key);
-//    if (packets == 0)
-//        return DROP;
-//
-//    *packets += len;
-//
-//    int bytes_key = BYTES_KEY;
-//    __u64 *bytes = 0;
-//
-//    bytes = bpf_map_lookup_elem(&count_map, &bytes_key);
-//    if (bytes == 0)
-//        return DROP;
-//
-//    *bytes += data_end - data;
 
     return KEEP;
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"time"
 	"unsafe"
 
 	"github.com/iovisor/gobpf/elf"
@@ -32,7 +31,10 @@ type event struct {
 	DestIP    netaddr.IP
 	SrcPort   uint16
 	DestPort  uint16
+	Seq       uint32
+	AckSeq    uint32
 	DataLen   uint32
+	Flags     string
 }
 
 func eventToGo(data *[]byte) event {
@@ -45,7 +47,19 @@ func eventToGo(data *[]byte) event {
 	evnt.DestIP = toIP(uint32(eventC.dest_ip))
 	evnt.SrcPort = uint16(eventC.src_port)
 	evnt.DestPort = uint16(eventC.dest_port)
+	evnt.Seq = uint32(eventC.seq)
+	evnt.AckSeq = uint32(eventC.ack_seq)
 	evnt.DataLen = uint32(eventC.len)
+	flags := uint16(eventC.flags)
+	if flags&1 == 1 {
+		evnt.Flags += "SYN "
+	}
+	if flags&2 == 2 {
+		evnt.Flags += "ACK "
+	}
+	if flags&4 == 4 {
+		evnt.Flags += "FIN "
+	}
 
 	return evnt
 }
@@ -97,10 +111,7 @@ func (a *App) watchContainers() {
 		path := k8s.GetCGroupPath(cgroups.CgroupRoot(), event.PodUID, event.PodQOSClass)
 
 		a.mu.Lock()
-		switch event.Type {
-		case k8s.NewPodEvent:
 			a.attachPod(event.FullName, path)
-		case k8s.DeletePodEvent:
 			a.detachPod(event.FullName)
 		}
 		a.mu.Unlock()
@@ -145,61 +156,6 @@ func (a *App) watchTable() {
 
 			fmt.Println("LOST: ", lost)
 		}
-	}
-}
-
-func (a *App) watchMap() {
-	mp := a.mod.Map("count")
-
-	packets_key := uint32(0)
-	syn_key := uint32(1)
-	ack_key := uint32(2)
-	bytes_key := uint32(3)
-
-	if err := a.updateMap(mp, packets_key, 0); err != nil {
-		fmt.Printf("error updating map: %v\n", err)
-	}
-	if err := a.updateMap(mp, syn_key, 0); err != nil {
-		fmt.Printf("error updating map: %v\n", err)
-	}
-	if err := a.updateMap(mp, ack_key, 0); err != nil {
-		fmt.Printf("error updating map: %v\n", err)
-	}
-	if err := a.updateMap(mp, bytes_key, 0); err != nil {
-		fmt.Printf("error updating map: %v\n", err)
-	}
-
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-a.doneCh:
-			return
-		case <-tick.C:
-		}
-
-		packets, err := a.lookupMap(mp, packets_key)
-		if err != nil {
-			fmt.Printf("error looking up in map: %v\n", err)
-		}
-
-		syn, err := a.lookupMap(mp, syn_key)
-		if err != nil {
-			fmt.Printf("error looking up in map: %v\n", err)
-		}
-
-		ack, err := a.lookupMap(mp, ack_key)
-		if err != nil {
-			fmt.Printf("error looking up in map: %v\n", err)
-		}
-
-		bytes, err := a.lookupMap(mp, packets_key)
-		if err != nil {
-			fmt.Printf("error looking up in map: %v\n", err)
-		}
-
-		fmt.Println("cgroup received", packets, "packets and", syn, "syns and", ack, "acks and", bytes, "bytes")
 	}
 }
 

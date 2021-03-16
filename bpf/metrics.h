@@ -7,7 +7,10 @@ struct event_t {
     unsigned long dest_ip;
     unsigned int src_port;
     unsigned int dest_port;
+    unsigned long seq;
+    unsigned long ack_seq;
     unsigned long len;
+    unsigned int flags;
 };
 
 #endif
