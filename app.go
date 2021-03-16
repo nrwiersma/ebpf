@@ -111,7 +111,10 @@ func (a *App) watchContainers() {
 		path := k8s.GetCGroupPath(cgroups.CgroupRoot(), event.PodUID, event.PodQOSClass)
 
 		a.mu.Lock()
+		switch event.Status {
+		case k8s.RunningStatus:
 			a.attachPod(event.FullName, path)
+		default:
 			a.detachPod(event.FullName)
 		}
 		a.mu.Unlock()

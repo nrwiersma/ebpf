@@ -15,15 +15,40 @@ import (
 type EventType int
 
 const (
-	NewPodEvent EventType = iota
+	UnkownEvent EventType = iota
+	NewPodEvent
+	UpdatedPodEvent
 	DeletePodEvent
 )
+
+type StatusType int
+
+const (
+	UnknownStatus StatusType = iota
+	PendingStatus
+	RunningStatus
+	TerminatedStatus
+)
+
+func fromPhase(phase v1.PodPhase) StatusType {
+	switch phase {
+	case v1.PodUnknown:
+		return UnknownStatus
+	case v1.PodPending:
+		return PendingStatus
+	case v1.PodRunning:
+		return RunningStatus
+	default:
+		return TerminatedStatus
+	}
+}
 
 type Event struct {
 	Type        EventType
 	Name        string
 	Namespace   string
 	FullName    string
+	Status      StatusType
 	PodUID      string
 	PodQOSClass string
 }
@@ -69,6 +94,7 @@ func onAdd(events chan Event) func(obj interface{}) {
 			Name:        pod.Name,
 			Namespace:   pod.Namespace,
 			FullName:    pod.Name + "/" + pod.Namespace,
+			Status:      fromPhase(pod.Status.Phase),
 			PodUID:      string(pod.UID),
 			PodQOSClass: string(pod.Status.QOSClass),
 		}
@@ -76,9 +102,22 @@ func onAdd(events chan Event) func(obj interface{}) {
 	}
 }
 
-func onUpdate(_ chan Event) func(oldObj, newObj interface{}) {
+func onUpdate(events chan Event) func(oldObj, newObj interface{}) {
 	return func(oldObj, newObj interface{}) {
-		// do nothing
+		pod, ok := newObj.(*v1.Pod)
+		if !ok {
+			return
+		}
+
+		events <- Event{
+			Type:        UpdatedPodEvent,
+			Name:        pod.Name,
+			Namespace:   pod.Namespace,
+			FullName:    pod.Name + "/" + pod.Namespace,
+			Status:      fromPhase(pod.Status.Phase),
+			PodUID:      string(pod.UID),
+			PodQOSClass: string(pod.Status.QOSClass),
+		}
 		return
 	}
 }
@@ -95,6 +134,7 @@ func onDelete(events chan Event) func(obj interface{}) {
 			Name:        pod.Name,
 			Namespace:   pod.Namespace,
 			FullName:    pod.Name + "/" + pod.Namespace,
+			Status:      fromPhase(pod.Status.Phase),
 			PodUID:      string(pod.UID),
 			PodQOSClass: string(pod.Status.QOSClass),
 		}
