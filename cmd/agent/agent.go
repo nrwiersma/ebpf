@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/nrwiersma/ebpf"
 	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
+	"github.com/hamba/logger"
 )
 
 func runAgent(c *cli.Context) error {
@@ -25,7 +27,9 @@ func runAgent(c *cli.Context) error {
 		return err
 	}
 
-	app, err := ebpf.NewApp()
+	log := createLogger()
+
+	app, err := ebpf.NewApp(log)
 	if err != nil {
 		return err
 	}
@@ -34,4 +38,13 @@ func runAgent(c *cli.Context) error {
 	<-ctx.Done()
 
 	return nil
+}
+
+func createLogger() logger.Logger {
+	h := logger.LevelFilterHandler(
+		logger.Info,
+		logger.BufferedStreamHandler(os.Stdout, 1024, time.Second, logger.ConsoleFormat()),
+	)
+
+	return  logger.New(h)
 }

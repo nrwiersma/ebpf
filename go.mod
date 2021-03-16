@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/hamba/logger v1.1.0
 	github.com/iovisor/gobpf v0.1.0
 	github.com/joho/godotenv v1.3.0
 	github.com/urfave/cli/v2 v2.3.0

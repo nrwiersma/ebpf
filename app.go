@@ -8,6 +8,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/hamba/logger"
 	"github.com/iovisor/gobpf/elf"
 	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/nrwiersma/ebpf/pkg/k8s"
@@ -71,9 +72,11 @@ type App struct {
 	cgroups map[string]string
 
 	doneCh chan struct{}
+
+	log logger.Logger
 }
 
-func NewApp() (*App, error) {
+func NewApp(log logger.Logger) (*App, error) {
 	mod := elf.NewModuleFromReader(bytes.NewReader(bpf))
 
 	err := mod.Load(map[string]elf.SectionParams{})
@@ -84,12 +87,12 @@ func NewApp() (*App, error) {
 	app := &App{
 		mod:     mod,
 		cgroups: map[string]string{},
+		log:     log,
 	}
 
 	go app.watchContainers()
 
 	go app.watchTable()
-	//go app.watchMap()
 
 	return app, nil
 }
@@ -99,12 +102,11 @@ func (a *App) watchContainers() {
 	defer close(events)
 
 	if err := k8s.WatchPodEvents(events, a.doneCh); err != nil {
-		fmt.Printf("Cannot watch for pods: %v", err)
+		a.log.Error("Unable to watch pods", "error", err)
 	}
 
 	for event := range events {
 		if event.Namespace != "app" {
-			fmt.Printf("Ignoring pod %s\n", event.FullName)
 			continue
 		}
 
@@ -131,7 +133,7 @@ func (a *App) watchTable() {
 
 	mp, err := elf.InitPerfMap(a.mod, "events", eventsCh, lostCh)
 	if err != nil {
-		fmt.Printf("error loading perf map: %v\n", err)
+		a.log.Error("Unable to load map", "error", err)
 	}
 	mp.SetTimestampFunc(func(data *[]byte) uint64 {
 		eventC := (*C.struct_event_t)(unsafe.Pointer(&(*data)[0]))
@@ -151,13 +153,14 @@ func (a *App) watchTable() {
 			}
 
 			evnt := eventToGo(&data)
-			fmt.Printf("EVENT: %+v\n", evnt)
+
+			a.log.Info("Got", "event", evnt)
 		case lost, ok := <-lostCh:
 			if !ok {
 				return
 			}
 
-			fmt.Println("LOST: ", lost)
+			a.log.Warn("Lost events", "count", lost)
 		}
 	}
 }
@@ -179,12 +182,10 @@ func (a *App) attachPod(name, path string) {
 		return
 	}
 
-	fmt.Printf("attaching pod %s\n", name)
-
 	attached := false
 	for prog := range a.mod.IterCgroupProgram() {
 		if err := elf.AttachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
-			fmt.Println("attach", err)
+			a.log.Error("Unable to attach to pod", "pod", name, "path", path, "error", err)
 			continue
 		}
 		attached = true
@@ -194,7 +195,7 @@ func (a *App) attachPod(name, path string) {
 		return
 	}
 
-	fmt.Printf("attached pod %s\n", name)
+	a.log.Debug("Attached pod", "pod", name)
 
 	a.cgroups[name] = path
 }
@@ -207,7 +208,7 @@ func (a *App) detachPod(name string) {
 	path := a.cgroups[name]
 	for prog := range a.mod.IterCgroupProgram() {
 		if err := elf.DetachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
-			fmt.Println("detach", err)
+			a.log.Error("Unable to detach to pod", "pod", name, "error", err)
 		}
 	}
 }
