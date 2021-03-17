@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <uapi/linux/bpf.h>
 #include <uapi/linux/if_ether.h>
+#include <uapi/linux/if_vlan.h>
 #include <uapi/linux/ip.h>
 #include <uapi/linux/tcp.h>
 #include <arpa/inet.h>
@@ -24,27 +25,41 @@ struct bpf_map_def SEC("maps/events") events = {
     .max_entries = 1024 * 64,
 };
 
+#define advance(skb, var_off, hdr)                      \
+({                                                      \
+	void *data = (void *)(long)skb->data + var_off;     \
+	void *data_end = (void *)(long)skb->data_end;       \
+                                                        \
+	if (data + sizeof(*hdr) > data_end)                 \
+		return KEEP;                                    \
+                                                        \
+	hdr = (void *)(data);                               \
+})
+
 SEC("cgroup/skb")
 int metrics(struct __sk_buff *skb)
 {
+    __u32 len = skb->len;
+    __u32 nh_off;
     __u32 hdrlen;
     struct iphdr *ip4;
     struct tcphdr *tcp;
     struct event_t event = {};
 
-    __u32 len = skb->len;
-    void* data = (void*)(long)skb->data;
-    void* data_end = (void*)(long)skb->data_end;
+    __u32 proto = skb->protocol;
+    if (skb->vlan_present) {
+        // TODO: handle double tagged vlan
+
+        proto = skb->vlan_proto;
+    }
 
     // TODO: handle ipv6
     if (skb->protocol != __constant_htons(ETH_P_IP))
         return KEEP;
 
-    if (data + sizeof(*ip4) > data_end)
-        return KEEP;
+    advance(skb, 0, ip4);
 
     // TODO: handle udp
-    ip4 = data;
     if (ip4->protocol != IPPROTO_TCP)
         return KEEP;
 
@@ -54,12 +69,9 @@ int metrics(struct __sk_buff *skb)
 
     hdrlen = ip4->ihl << 2;
     len -= hdrlen;
-    data += hdrlen;
+    nh_off = hdrlen;
 
-    if (data + sizeof(*tcp) > data_end)
-        return KEEP;
-
-    tcp = data;
+    advance(skb, nh_off, tcp);
 
     event.src_port = __constant_ntohs(tcp->source);
     event.dest_port = __constant_ntohs(tcp->dest);
