@@ -10,6 +10,7 @@ struct event_t {
     unsigned long seq;
     unsigned long ack_seq;
     unsigned long len;
+    unsigned int direction;
     unsigned int flags;
 };
 

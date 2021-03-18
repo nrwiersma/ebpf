@@ -36,12 +36,16 @@ type event struct {
 	AckSeq    uint32
 	DataLen   uint32
 	Flags     string
+	Direction string
 }
 
 func eventToGo(data *[]byte) event {
 	var evnt event
 
-	eventC := (*C.struct_event_t)(unsafe.Pointer(&(*data)[0]))
+	raw := make([]byte, len(*data))
+	copy(raw, *data)
+
+	eventC := (*C.struct_event_t)(unsafe.Pointer(&raw[0]))
 
 	evnt.Timestamp = uint64(eventC.ts)
 	evnt.SrcIP = toIP(uint32(eventC.src_ip))
@@ -51,6 +55,12 @@ func eventToGo(data *[]byte) event {
 	evnt.Seq = uint32(eventC.seq)
 	evnt.AckSeq = uint32(eventC.ack_seq)
 	evnt.DataLen = uint32(eventC.len)
+
+	evnt.Direction = "IN"
+	if uint16(eventC.direction) == 2 {
+		evnt.Direction = "OUT"
+	}
+
 	flags := uint16(eventC.flags)
 	if flags&1 == 1 {
 		evnt.Flags += "SYN "
@@ -183,12 +193,25 @@ func (a *App) attachPod(name, path string) {
 	}
 
 	attached := false
-	for prog := range a.mod.IterCgroupProgram() {
-		if err := elf.AttachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
+	inProg := a.mod.CgroupProgram("cgroup/skb/ingress")
+	outProg := a.mod.CgroupProgram("cgroup/skb/egress")
+
+	if inProg != nil {
+		if err := elf.AttachCgroupProgram(inProg, path, elf.IngressType); err != nil {
 			a.log.Error("Unable to attach to pod", "pod", name, "path", path, "error", err)
-			continue
 		}
 		attached = true
+	} else {
+		a.log.Error("Unable to find ingress prog")
+	}
+
+	if outProg != nil {
+		if err := elf.AttachCgroupProgram(outProg, path, elf.EgressType); err != nil {
+			a.log.Error("Unable to attach to pod", "pod", name, "path", path, "error", err)
+		}
+		attached = true
+	} else {
+		a.log.Error("Unable to find egress prog")
 	}
 
 	if !attached {
@@ -206,10 +229,23 @@ func (a *App) detachPod(name string) {
 	}
 
 	path := a.cgroups[name]
-	for prog := range a.mod.IterCgroupProgram() {
-		if err := elf.DetachCgroupProgram(prog, path, elf.IngressType|elf.EgressType); err != nil {
-			a.log.Error("Unable to detach to pod", "pod", name, "error", err)
+	inProg := a.mod.CgroupProgram("cgroup/skb/ingress")
+	outProg := a.mod.CgroupProgram("cgroup/skb/egress")
+
+	if inProg != nil {
+		if err := elf.DetachCgroupProgram(inProg, path, elf.IngressType); err != nil {
+			a.log.Error("Unable to detach to pod", "pod", name, "path", path, "error", err)
 		}
+	} else {
+		a.log.Error("Unable to find ingress prog")
+	}
+
+	if outProg != nil {
+		if err := elf.DetachCgroupProgram(outProg, path, elf.EgressType); err != nil {
+			a.log.Error("Unable to detach to pod", "pod", name, "path", path, "error", err)
+		}
+	} else {
+		a.log.Error("Unable to find egress prog")
 	}
 }
 

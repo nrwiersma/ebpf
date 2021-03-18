@@ -36,8 +36,8 @@ struct bpf_map_def SEC("maps/events") events = {
 	hdr = (void *)(data);                               \
 })
 
-SEC("cgroup/skb")
-int metrics(struct __sk_buff *skb)
+__attribute__((always_inline))
+int process(struct __sk_buff *skb, __u16 direction)
 {
     __u32 len = skb->len;
     __u32 nh_off;
@@ -46,16 +46,10 @@ int metrics(struct __sk_buff *skb)
     struct tcphdr *tcp;
     struct event_t event = {};
 
-    __u32 proto = skb->protocol;
-    if (skb->vlan_present) {
-        // TODO: handle double tagged vlan
-
-        proto = skb->vlan_proto;
-    }
-
     // TODO: handle ipv6
-    if (skb->protocol != __constant_htons(ETH_P_IP))
+    if (skb->protocol != __constant_htons(ETH_P_IP)) {
         return KEEP;
+    }
 
     advance(skb, 0, ip4);
 
@@ -77,6 +71,7 @@ int metrics(struct __sk_buff *skb)
     event.dest_port = __constant_ntohs(tcp->dest);
     event.seq = __constant_ntohl(tcp->seq);
     event.ack_seq = __constant_ntohl(tcp->ack_seq);
+    event.direction = direction;
     event.flags = 0;
     if (tcp->syn)
         event.flags += 1;
@@ -92,6 +87,18 @@ int metrics(struct __sk_buff *skb)
     bpf_perf_event_output(skb, &events, 0 /* flags */, &event, sizeof(event));
 
     return KEEP;
+}
+
+SEC("cgroup/skb/ingress")
+int metrics_ingress(struct __sk_buff *skb)
+{
+    return process(skb, 1);
+}
+
+SEC("cgroup/skb/egress")
+int metrics_egress(struct __sk_buff *skb)
+{
+    return process(skb, 2);
 }
 
 char _license[] SEC("license") = "GPL";
