@@ -133,60 +133,6 @@ func (a *App) watchContainers() {
 	}
 }
 
-func (a *App) watchTable() {
-	eventsCh := make(chan []byte)
-	lostCh := make(chan uint64)
-	defer func() {
-		close(eventsCh)
-		close(lostCh)
-	}()
-
-	mp, err := elf.InitPerfMap(a.mod, "events", eventsCh, lostCh)
-	if err != nil {
-		a.log.Error("Unable to load map", "error", err)
-	}
-	mp.SetTimestampFunc(func(data *[]byte) uint64 {
-		eventC := (*C.struct_event_t)(unsafe.Pointer(&(*data)[0]))
-		return uint64(eventC.ts) + 100000 // Delay data a little so not out of order.
-	})
-
-	mp.PollStart()
-	defer mp.PollStop()
-
-	for {
-		select {
-		case <-a.doneCh:
-			return
-		case data, ok := <-eventsCh:
-			if !ok {
-				return
-			}
-
-			evnt := eventToGo(&data)
-
-			a.log.Info("Got", "event", evnt)
-		case lost, ok := <-lostCh:
-			if !ok {
-				return
-			}
-
-			a.log.Warn("Lost events", "count", lost)
-		}
-	}
-}
-
-func (a *App) updateMap(mp *elf.Map, key uint32, value uint64) error {
-	return a.mod.UpdateElement(mp, unsafe.Pointer(&key), unsafe.Pointer(&value), 0)
-}
-
-func (a *App) lookupMap(mp *elf.Map, key uint32) (uint64, error) {
-	var value uint64
-	if err := a.mod.LookupElement(mp, unsafe.Pointer(&key), unsafe.Pointer(&value)); err != nil {
-		return 0, err
-	}
-	return value, nil
-}
-
 func (a *App) attachPod(name, path string) {
 	if _, ok := a.cgroups[name]; ok {
 		return
@@ -246,6 +192,48 @@ func (a *App) detachPod(name string) {
 		}
 	} else {
 		a.log.Error("Unable to find egress prog")
+	}
+}
+
+func (a *App) watchTable() {
+	eventsCh := make(chan []byte, 100)
+	lostCh := make(chan uint64, 100)
+	defer func() {
+		close(eventsCh)
+		close(lostCh)
+	}()
+
+	mp, err := elf.InitPerfMap(a.mod, "events", eventsCh, lostCh)
+	if err != nil {
+		a.log.Error("Unable to load map", "error", err)
+	}
+	mp.SetTimestampFunc(func(data *[]byte) uint64 {
+		eventC := (*C.struct_event_t)(unsafe.Pointer(&(*data)[0]))
+		return uint64(eventC.ts) + 100000 // Delay data a little so not out of order.
+	})
+
+	mp.PollStart()
+	defer mp.PollStop()
+
+	for {
+		select {
+		case <-a.doneCh:
+			return
+		case data, ok := <-eventsCh:
+			if !ok {
+				return
+			}
+
+			evnt := eventToGo(&data)
+
+			a.log.Info("Got", "event", evnt)
+		case lost, ok := <-lostCh:
+			if !ok {
+				return
+			}
+
+			a.log.Warn("Lost events", "count", lost)
+		}
 	}
 }
 

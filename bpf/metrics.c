@@ -13,11 +13,6 @@
 #define KEEP 1
 #define DROP 0
 
-#define PACKETS_KEY 0
-#define SYN_KEY 1
-#define ACK_KEY 2
-#define BYTES_KEY 3
-
 struct bpf_map_def SEC("maps/events") events = {
 	.type = BPF_MAP_TYPE_PERF_EVENT_ARRAY,
     .key_size = sizeof(int),
