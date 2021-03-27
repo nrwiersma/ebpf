@@ -1,6 +1,7 @@
 PWD=$(shell pwd)
 
 GO_MODCACHE=$(shell go env GOMODCACHE)
+GO_BUILDCACHE=$(shell go env GOCACHE)
 
 BPF_BUILD_TAG?=build-bpf
 GO_BUILD_TAG?=build-go
@@ -49,6 +50,7 @@ build-docker: go-build-image
 	@docker run --rm -it \
 		-v $(PWD):/app \
 		-v $(GO_MODCACHE):/go/pkg/mod \
+		-v $(GO_BUILDCACHE):/root/.cache/go-build \
 		$(GO_BUILD_TAG)
 .PHONY: build-docker
 

@@ -6,11 +6,12 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/hamba/logger"
 	"github.com/nrwiersma/ebpf"
+	"github.com/nrwiersma/ebpf/containers/k8s"
 	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
-	"github.com/hamba/logger"
 )
 
 func runAgent(c *cli.Context) error {
@@ -27,9 +28,14 @@ func runAgent(c *cli.Context) error {
 		return err
 	}
 
+	ctrs, err := k8s.New(c.String(flagNode), cgroups.CgroupRoot(), []string{"kube-system", c.String(flagNs)})
+	if err != nil {
+		return err
+	}
+
 	log := createLogger()
 
-	app, err := ebpf.NewApp(log)
+	app, err := ebpf.NewApp(ctrs, log)
 	if err != nil {
 		return err
 	}
@@ -46,5 +52,5 @@ func createLogger() logger.Logger {
 		logger.BufferedStreamHandler(os.Stdout, 1024, time.Second, logger.ConsoleFormat()),
 	)
 
-	return  logger.New(h)
+	return logger.New(h)
 }

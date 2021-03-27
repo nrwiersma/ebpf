@@ -10,8 +10,7 @@ import (
 
 	"github.com/hamba/logger"
 	"github.com/iovisor/gobpf/elf"
-	"github.com/nrwiersma/ebpf/pkg/cgroups"
-	"github.com/nrwiersma/ebpf/pkg/k8s"
+	"github.com/nrwiersma/ebpf/containers"
 	"inet.af/netaddr"
 )
 
@@ -75,8 +74,16 @@ func eventToGo(data *[]byte) event {
 	return evnt
 }
 
+// Containers represents a container service.
+type Containers interface {
+	Events() <-chan containers.ContainerEvent
+	Name(ip uint32, port uint16) string
+}
+
+// App is the core orchestrator.
 type App struct {
-	mod *elf.Module
+	mod  *elf.Module
+	ctrs Containers
 
 	mu      sync.Mutex
 	cgroups map[string]string
@@ -86,7 +93,8 @@ type App struct {
 	log logger.Logger
 }
 
-func NewApp(log logger.Logger) (*App, error) {
+// NewApp returns an application.
+func NewApp(ctrs Containers, log logger.Logger) (*App, error) {
 	mod := elf.NewModuleFromReader(bytes.NewReader(bpf))
 
 	err := mod.Load(map[string]elf.SectionParams{})
@@ -96,6 +104,7 @@ func NewApp(log logger.Logger) (*App, error) {
 
 	app := &App{
 		mod:     mod,
+		ctrs:    ctrs,
 		cgroups: map[string]string{},
 		log:     log,
 	}
@@ -108,26 +117,22 @@ func NewApp(log logger.Logger) (*App, error) {
 }
 
 func (a *App) watchContainers() {
-	events := make(chan k8s.Event, 100)
-	defer close(events)
+	events := a.ctrs.Events()
 
-	if err := k8s.WatchPodEvents(events, a.doneCh); err != nil {
-		a.log.Error("Unable to watch pods", "error", err)
-	}
-
-	for event := range events {
-		if event.Namespace != "app" {
-			continue
+	for {
+		var evnt containers.ContainerEvent
+		select {
+		case <-a.doneCh:
+			return
+		case evnt = <-events:
 		}
 
-		path := k8s.GetCGroupPath(cgroups.CgroupRoot(), event.PodUID, event.PodQOSClass)
-
 		a.mu.Lock()
-		switch event.Status {
-		case k8s.RunningStatus:
-			a.attachPod(event.FullName, path)
+		switch evnt.Type {
+		case containers.Added:
+			a.attachPod(evnt.Name, evnt.CGroupPath)
 		default:
-			a.detachPod(event.FullName)
+			a.detachPod(evnt.Name)
 		}
 		a.mu.Unlock()
 	}

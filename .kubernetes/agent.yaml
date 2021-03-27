@@ -64,20 +64,16 @@ spec:
           name: agent
           command:
             - "/agent"
-          volumeMounts:
-            - name: sys-fs
-              mountPath: /sys/fs
-            - name: docker-socket
-              mountPath: /var/run/docker.sock
-              readOnly: true
+          env:
+            - name: NODE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             privileged: true
       hostNetwork: true
       hostPID: true
-      volumes:
-        - name: sys-fs
-          hostPath:
-            path: /sys/fs
-        - name: docker-socket
-          hostPath:
-            path: /var/run/docker.sock

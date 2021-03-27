@@ -1,7 +1,7 @@
 SHELL=/bin/bash -o pipefail
 DEST_DIR?=/src/dist
 
-LINUX_HEADERS ?= /usr/src/linux-headers-5.10.16-0-lts
+LINUX_HEADERS ?= /usr/src/linux-headers-5.10.26-0-lts
 
 build:
 	@mkdir -p "$(DEST_DIR)"
