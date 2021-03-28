@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -59,7 +60,10 @@ func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []st
 
 	go fac.Start(svc.doneCh)
 
-	for typ, ok := range fac.WaitForCacheSync(svc.doneCh) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for typ, ok := range fac.WaitForCacheSync(ctx.Done()) {
 		if !ok {
 			return nil, fmt.Errorf("could not sync k8s object caches for %q", typ)
 		}
