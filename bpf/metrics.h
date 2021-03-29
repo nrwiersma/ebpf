@@ -2,16 +2,16 @@
 #define __METRICS_H
 
 struct event_t {
-    unsigned long long ts;
-    unsigned long src_ip;
-    unsigned long dest_ip;
-    unsigned int src_port;
-    unsigned int dest_port;
-    unsigned long seq;
-    unsigned long ack_seq;
-    unsigned long len;
-    unsigned int direction;
-    unsigned int flags;
+    __u64 ts;
+    __u32 src_ip[4];
+    __u32 dest_ip[4];
+    __u16 src_port;
+    __u16 dest_port;
+    __u32 seq;
+    __u32 ack_seq;
+    __u32 len;
+    __u16 direction;
+    __u16 flags;
 };
 
 #endif

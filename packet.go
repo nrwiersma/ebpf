@@ -169,8 +169,8 @@ func toPacket(raw *[]byte) packet {
 	eventC := (*C.struct_event_t)(unsafe.Pointer(&(*raw)[0]))
 
 	pkt.Timestamp = uint64(eventC.ts)
-	pkt.SrcIP = toIP(uint32(eventC.src_ip))
-	pkt.DestIP = toIP(uint32(eventC.dest_ip))
+	pkt.SrcIP = toIP(eventC.src_ip)
+	pkt.DestIP = toIP(eventC.dest_ip)
 	pkt.SrcPort = uint16(eventC.src_port)
 	pkt.DestPort = uint16(eventC.dest_port)
 	pkt.Seq = uint32(eventC.seq)
@@ -196,6 +196,15 @@ func toPacket(raw *[]byte) packet {
 	return pkt
 }
 
+func toIP(raw [4]C.uint) netaddr.IP {
+	var b [16]byte
+	binary.BigEndian.PutUint32(b[:4], uint32(raw[0]))
+	binary.BigEndian.PutUint32(b[4:8], uint32(raw[1]))
+	binary.BigEndian.PutUint32(b[8:12], uint32(raw[2]))
+	binary.BigEndian.PutUint32(b[12:], uint32(raw[3]))
+	return netaddr.IPFrom16(b)
+}
+
 // Close detaches all containers and closes the packet module.
 func (s *packetService) Close() error {
 	for name := range s.cgroups {
@@ -210,10 +219,4 @@ func (s *packetService) Close() error {
 	close(s.lostCh)
 
 	return nil
-}
-
-func toIP(raw uint32) netaddr.IP {
-	var b [4]byte
-	binary.BigEndian.PutUint32(b[:], raw)
-	return netaddr.IPv4(b[0], b[1], b[2], b[3])
 }

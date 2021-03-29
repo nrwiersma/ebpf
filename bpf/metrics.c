@@ -31,9 +31,15 @@ struct bpf_map_def SEC("maps/events") events = {
 	hdr = (void *)(data);                               \
 })
 
-__attribute__((always_inline))
-int process(struct __sk_buff *skb, __u16 direction)
-{
+static __always_inline
+void ipv4tov6(__be32 ipv6[4], __be32 ip) {
+    // Assume the ipv6 is zeroed.
+    ipv6[2] = 0xffff;
+    ipv6[3] = __constant_htonl(ip);
+}
+
+static __always_inline
+int process(struct __sk_buff *skb, __u16 direction) {
     __u32 len = skb->len;
     __u32 nh_off;
     __u32 hdrlen;
@@ -53,8 +59,8 @@ int process(struct __sk_buff *skb, __u16 direction)
         return KEEP;
 
     event.ts = bpf_ktime_get_ns();
-    event.src_ip = __constant_ntohl(ip4->saddr);
-    event.dest_ip = __constant_ntohl(ip4->daddr);
+    ipv4tov6(event.src_ip, ip4->saddr);
+    ipv4tov6(event.dest_ip, ip4->daddr);
 
     hdrlen = ip4->ihl << 2;
     len -= hdrlen;
