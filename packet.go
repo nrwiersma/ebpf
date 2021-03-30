@@ -29,9 +29,8 @@ type packet struct {
 	DestIP    netaddr.IP
 	SrcPort   uint16
 	DestPort  uint16
-	Seq       uint32
-	AckSeq    uint32
-	DataLen   uint32
+	Len       uint32
+	RTT       uint32
 	Flags     string
 	Direction string
 }
@@ -68,7 +67,7 @@ func newPacketService() (*packetService, error) {
 
 	pktsCh := make(chan []byte, 100)
 	lostCh := make(chan uint64, 100)
-	pktMap, err := elf.InitPerfMap(mod, "events", pktsCh, lostCh)
+	pktMap, err := elf.InitPerfMap(mod, "packets", pktsCh, lostCh)
 	if err != nil {
 		return nil, fmt.Errorf("unable to load map: %w", err)
 	}
@@ -129,7 +128,7 @@ func (s *packetService) DetachContainer(name string) error {
 
 func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64), stopCh <-chan struct{}) {
 	s.pktMap.SetTimestampFunc(func(data *[]byte) uint64 {
-		eventC := (*C.struct_event_t)(unsafe.Pointer(&(*data)[0]))
+		eventC := (*C.struct_pkt_entry)(unsafe.Pointer(&(*data)[0]))
 		return uint64(eventC.ts) + 100*1000 // Delay data by 100us so not out of order.
 	})
 
@@ -166,30 +165,26 @@ func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64), s
 func toPacket(raw *[]byte) packet {
 	var pkt packet
 
-	eventC := (*C.struct_event_t)(unsafe.Pointer(&(*raw)[0]))
+	pktC := (*C.struct_pkt_entry)(unsafe.Pointer(&(*raw)[0]))
 
-	pkt.Timestamp = uint64(eventC.ts)
-	pkt.SrcIP = toIP(eventC.src_ip)
-	pkt.DestIP = toIP(eventC.dest_ip)
-	pkt.SrcPort = uint16(eventC.src_port)
-	pkt.DestPort = uint16(eventC.dest_port)
-	pkt.Seq = uint32(eventC.seq)
-	pkt.AckSeq = uint32(eventC.ack_seq)
-	pkt.DataLen = uint32(eventC.len)
+	pkt.Timestamp = uint64(pktC.ts)
+	pkt.SrcIP = toIP(pktC.src_ip)
+	pkt.DestIP = toIP(pktC.dest_ip)
+	pkt.SrcPort = uint16(pktC.src_port)
+	pkt.DestPort = uint16(pktC.dest_port)
+	pkt.Len = uint32(pktC.len)
+	pkt.RTT = uint32(pktC.rtt)
 
 	pkt.Direction = "IN"
-	if uint16(eventC.direction) == 2 {
+	if uint16(pktC.flags)&2 == 2 {
 		pkt.Direction = "OUT"
 	}
 
-	flags := uint16(eventC.flags)
-	if flags&1 == 1 {
+	flags := uint16(pktC.flags)
+	if flags&4 == 4 {
 		pkt.Flags += "SYN "
 	}
-	if flags&2 == 2 {
-		pkt.Flags += "ACK "
-	}
-	if flags&4 == 4 {
+	if flags&8 == 8 {
 		pkt.Flags += "FIN "
 	}
 
