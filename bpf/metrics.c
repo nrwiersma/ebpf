@@ -11,14 +11,6 @@
 #include "bpf_helpers.h"
 #include "metrics.h"
 
-#define DIR_IN 1
-#define DIR_OUT 2
-#define TYPE_SYN 4
-#define TYPE_FIN 8
-
-#define PROTO_UDP 1
-#define PROTO_TCP 2
-
 #define KEEP 1
 #define DROP 0
 

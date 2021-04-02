@@ -1,6 +1,8 @@
 package ebpf
 
 import (
+	"time"
+
 	"github.com/hamba/logger"
 	"github.com/nrwiersma/ebpf/containers"
 )
@@ -8,7 +10,7 @@ import (
 // Containers represents a container service.
 type Containers interface {
 	Events() <-chan containers.ContainerEvent
-	Name(ip uint32, port uint16) string
+	Name(ip [16]byte) string
 }
 
 // App is the core orchestrator.
@@ -16,6 +18,7 @@ type App struct {
 	ctrs Containers
 
 	pkts *packetService
+	mtrs *metricService
 
 	doneCh chan struct{}
 
@@ -35,6 +38,8 @@ func NewApp(ctrs Containers, log logger.Logger) (*App, error) {
 		doneCh: make(chan struct{}),
 		log:    log,
 	}
+
+	app.mtrs = newMetricsService(10*time.Second, app.handleMetrics)
 
 	go pkts.Watch(app.handlePacket, app.handleLost, app.doneCh)
 
@@ -70,15 +75,76 @@ func (a *App) watchContainers() {
 }
 
 func (a *App) handlePacket(pkt packet) {
-	a.log.Info("Got", "packet", pkt)
+	// We can ignore syn and fin for now.
+	if pkt.Flags&flagSyn == flagSyn || pkt.Flags&flagFin == flagFin {
+		return
+	}
+
+	var (
+		sip, rip  [16]byte
+		bin, bout uint64
+	)
+	switch {
+	case pkt.Flags&flagIn == flagIn:
+		sip = pkt.DestIP
+		rip = pkt.SrcIP
+		bin = uint64(pkt.Len)
+	case pkt.Flags&flagOut == flagOut:
+		sip = pkt.SrcIP
+		rip = pkt.DestIP
+		bout = uint64(pkt.Len)
+	}
+
+	port := pkt.SrcPort
+	if pkt.DestPort < port {
+		port = pkt.DestPort
+	}
+
+	var proto string
+	switch {
+	case pkt.Protocol&protoUDP == protoUDP:
+		proto = "UDP"
+	case pkt.Protocol&protoTCP == protoTCP:
+		proto = "TCP"
+	}
+
+	rec := record{
+		Subject:  a.ctrs.Name(sip),
+		Remote:   a.ctrs.Name(rip),
+		Port:     port,
+		Protocol: proto,
+		BytesIn:  bin,
+		BytesOut: bout,
+		RTT:      float64(pkt.RTT) / 1000000, // Convert to ms.
+	}
+
+	a.mtrs.Add(rec)
+}
+
+func (a *App) handleMetrics(ms []metric) {
+	for _, m := range ms {
+		a.log.Info("Got",
+			"subj", m.Subject,
+			"remo", m.Remote,
+			"port", m.Port,
+			"proto", m.Protocol,
+			"out", m.BytesOut,
+			"in", m.BytesIn,
+			"rtt p50", m.RTT.Quantile(0.5),
+			"rtt p90", m.RTT.Quantile(0.9),
+			"rtt p95", m.RTT.Quantile(0.95),
+		)
+	}
 }
 
 func (a *App) handleLost(cnt uint64) {
-	a.log.Warn("Lost events", "count", cnt)
+	a.log.Error("Lost events", "count", cnt)
 }
 
 func (a *App) Close() error {
 	close(a.doneCh)
 
-	return a.pkts.Close()
+	_ = a.pkts.Close()
+
+	return a.mtrs.Close()
 }

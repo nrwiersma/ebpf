@@ -6,12 +6,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
 	"unsafe"
 
 	"github.com/iovisor/gobpf/elf"
-	"inet.af/netaddr"
 )
 
 /*
@@ -23,16 +21,26 @@ import "C"
 //go:embed bpf/dist/metrics.o
 var bpf []byte
 
+const (
+	flagIn = 1 << iota
+	flagOut
+	flagSyn
+	flagFin
+
+	protoUDP = iota + 1
+	protoTCP
+)
+
 type packet struct {
 	Timestamp uint64
-	SrcIP     netaddr.IP
-	DestIP    netaddr.IP
+	SrcIP     [16]byte
+	DestIP    [16]byte
 	SrcPort   uint16
 	DestPort  uint16
 	Len       uint32
 	RTT       uint32
-	Flags     string
-	Direction string
+	Protocol  uint16
+	Flags     uint16
 }
 
 type packetService struct {
@@ -135,31 +143,23 @@ func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64), s
 	s.pktMap.PollStart()
 	defer s.pktMap.PollStop()
 
-	// We want to run as many consumers as there are CPUs. This gives the
-	// userspace a fighting chance of keeping up with the kernel space.
-	cpus := runtime.NumCPU()
-	for i := 0; i < cpus; i++ {
-		go func() {
-			for {
-				select {
-				case <-stopCh:
-					return
-				case raw, ok := <-s.pktsCh:
-					if !ok {
-						return
-					}
-					pktFn(toPacket(&raw))
-				case lost, ok := <-s.lostCh:
-					if !ok {
-						return
-					}
-					lostFn(lost)
-				}
+	// This may need to be scaled up to keep up with full load.
+	for {
+		select {
+		case <-stopCh:
+			return
+		case raw, ok := <-s.pktsCh:
+			if !ok {
+				return
 			}
-		}()
+			pktFn(toPacket(&raw))
+		case lost, ok := <-s.lostCh:
+			if !ok {
+				return
+			}
+			lostFn(lost)
+		}
 	}
-
-	<-stopCh
 }
 
 func toPacket(raw *[]byte) packet {
@@ -174,30 +174,19 @@ func toPacket(raw *[]byte) packet {
 	pkt.DestPort = uint16(pktC.dest_port)
 	pkt.Len = uint32(pktC.len)
 	pkt.RTT = uint32(pktC.rtt)
-
-	pkt.Direction = "IN"
-	if uint16(pktC.flags)&2 == 2 {
-		pkt.Direction = "OUT"
-	}
-
-	flags := uint16(pktC.flags)
-	if flags&4 == 4 {
-		pkt.Flags += "SYN "
-	}
-	if flags&8 == 8 {
-		pkt.Flags += "FIN "
-	}
+	pkt.Protocol = uint16(pktC.protocol)
+	pkt.Flags = uint16(pktC.flags)
 
 	return pkt
 }
 
-func toIP(raw [4]C.uint) netaddr.IP {
+func toIP(raw [4]C.__be32) [16]byte {
 	var b [16]byte
 	binary.BigEndian.PutUint32(b[:4], uint32(raw[0]))
 	binary.BigEndian.PutUint32(b[4:8], uint32(raw[1]))
 	binary.BigEndian.PutUint32(b[8:12], uint32(raw[2]))
 	binary.BigEndian.PutUint32(b[12:], uint32(raw[3]))
-	return netaddr.IPFrom16(b)
+	return b
 }
 
 // Close detaches all containers and closes the packet module.
