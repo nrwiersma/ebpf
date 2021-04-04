@@ -1,0 +1,67 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: server
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server
+  template:
+    metadata:
+      labels:
+        app: server
+    spec:
+      containers:
+        - name: server
+          image: media-server.wiersma.lan/ebpf:latest
+          imagePullPolicy: Always
+          command:
+            - "/net"
+            - "server"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: app
+  labels:
+    app: server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      name: server
+  selector:
+    app: server
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: client
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+        - name: server
+          image: media-server.wiersma.lan/ebpf:latest
+          imagePullPolicy: Always
+          command:
+            - "/net"
+            - "client"
+            - "--uri=http://server.app.svc.cluster.local"
