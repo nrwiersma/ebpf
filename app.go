@@ -99,7 +99,7 @@ func (a *App) handlePacket(pkt packet) {
 	}
 
 	var proto string
-	switch pkt.Protocol {
+	switch pkt.Proto {
 	case protoUDP:
 		proto = "UDP"
 	case protoTCP:

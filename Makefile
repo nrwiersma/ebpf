@@ -42,7 +42,7 @@ clean-bpf:
 
 # Build the commands
 build:
-	@CGO_ENABLED=1 GOOS=linux GOARCH=amd64 find ./cmd/* -maxdepth 1 -type d -exec go build -ldflags="-w -s" {} \;
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 find ./cmd/* -maxdepth 1 -type d -exec go build -ldflags="-w -s" {} \;
 .PHONY: build
 
 build-docker: go-build-image

@@ -41,8 +41,8 @@ struct bpf_map_def SEC("maps") packets = {
 static __always_inline
 void ipv4tov6(__be32 ipv6[4], __be32 ip) {
     // Assume the ipv6 is zeroed.
-    ipv6[2] = 0xffff;
-    ipv6[3] = __constant_htonl(ip);
+    ipv6[2] = __constant_htonl(0xffff);
+    ipv6[3] = ip;
 }
 
 static __always_inline

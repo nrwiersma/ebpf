@@ -3,7 +3,6 @@ package ebpf
 import (
 	"bytes"
 	_ "embed"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"unsafe"
@@ -12,12 +11,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 )
-
-/*
-#include <linux/bpf.h>
-#include "bpf/metrics.h"
-*/
-import "C"
 
 //go:embed bpf/dist/metrics.o
 var bpf []byte
@@ -32,6 +25,9 @@ const (
 	protoTCP
 )
 
+// packet contains network packet data.
+//
+// Must stay in sync with bpf/metrics.h pkt_entry.
 type packet struct {
 	Timestamp uint64
 	SrcIP     [16]byte
@@ -40,8 +36,12 @@ type packet struct {
 	DestPort  uint16
 	Len       uint32
 	RTT       uint32
-	Protocol  uint16
+	Proto     uint16
 	Flags     uint16
+}
+
+func toPacket(raw []byte) packet {
+	return *(*packet)(unsafe.Pointer(&raw[0]))
 }
 
 type objects struct {
@@ -155,33 +155,6 @@ func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64)) {
 
 		pktFn(toPacket(rec.RawSample))
 	}
-}
-
-func toPacket(raw []byte) packet {
-	var pkt packet
-
-	pktC := (*C.struct_pkt_entry)(unsafe.Pointer(&raw[0]))
-
-	pkt.Timestamp = uint64(pktC.ts)
-	pkt.SrcIP = toIP(pktC.src_ip)
-	pkt.DestIP = toIP(pktC.dest_ip)
-	pkt.SrcPort = uint16(pktC.src_port)
-	pkt.DestPort = uint16(pktC.dest_port)
-	pkt.Len = uint32(pktC.len)
-	pkt.RTT = uint32(pktC.rtt)
-	pkt.Protocol = uint16(pktC.protocol)
-	pkt.Flags = uint16(pktC.flags)
-
-	return pkt
-}
-
-func toIP(raw [4]C.__be32) [16]byte {
-	var b [16]byte
-	binary.BigEndian.PutUint32(b[:4], uint32(raw[0]))
-	binary.BigEndian.PutUint32(b[4:8], uint32(raw[1]))
-	binary.BigEndian.PutUint32(b[8:12], uint32(raw[2]))
-	binary.BigEndian.PutUint32(b[12:], uint32(raw[3]))
-	return b
 }
 
 // Close detaches all containers and closes the packet module.
