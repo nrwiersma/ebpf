@@ -22,7 +22,10 @@ func runAgent(c *cli.Context) error {
 		Cur: unix.RLIM_INFINITY,
 		Max: unix.RLIM_INFINITY,
 	}
-	_ = unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
+	err := unix.Setrlimit(unix.RLIMIT_MEMLOCK, memlockLimit)
+	if err != nil {
+		return err
+	}
 
 	if err := cgroups.EnsureCgroupFS(""); err != nil {
 		return err

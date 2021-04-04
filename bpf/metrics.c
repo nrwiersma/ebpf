@@ -14,26 +14,25 @@
 #define KEEP 1
 #define DROP 0
 
-struct bpf_map_def SEC("maps/stash") stash = {
+struct bpf_map_def SEC("maps") stash = {
 	.type = BPF_MAP_TYPE_LRU_HASH,
     .key_size = sizeof(struct stash_tuple),
     .value_size = sizeof(struct pkt_entry),
     .max_entries = 1024 * 4,
 };
 
-struct bpf_map_def SEC("maps/packets") packets = {
+struct bpf_map_def SEC("maps") packets = {
 	.type = BPF_MAP_TYPE_PERF_EVENT_ARRAY,
     .key_size = sizeof(int),
     .value_size = sizeof(__u32),
-    .max_entries = 1024 * 64,
 };
 
 #define advance(skb, var_off, hdr)                      \
 ({                                                      \
+    __u32 len = sizeof(*hdr);                           \
 	void *data = (void *)(long)skb->data + var_off;     \
 	void *data_end = (void *)(long)skb->data_end;       \
-                                                        \
-	if (data + sizeof(*hdr) > data_end)                 \
+	if (data + len > data_end)                          \
 		return KEEP;                                    \
                                                         \
 	hdr = (void *)(data);                               \
@@ -65,6 +64,7 @@ int process(struct __sk_buff *skb, __u16 direction) {
     pkt.ts = bpf_ktime_get_ns();
     ipv4tov6(pkt.src_ip, ip4->saddr);
     ipv4tov6(pkt.dest_ip, ip4->daddr);
+    pkt.flags = direction;
 
     hdrlen = ip4->ihl << 2;
     len -= hdrlen;
@@ -76,20 +76,18 @@ int process(struct __sk_buff *skb, __u16 direction) {
 
     advance(skb, nh_off, tcp);
 
+    if (tcp->syn || tcp->fin)
+        return KEEP;
+
     hdrlen = tcp->doff << 2;
     len -= hdrlen;
 
     pkt.src_port = __constant_ntohs(tcp->source);
     pkt.dest_port = __constant_ntohs(tcp->dest);
     pkt.protocol = PROTO_TCP;
-    pkt.flags = direction;
-    if (tcp->syn)
-        pkt.flags += TYPE_SYN;
-    else if (tcp->fin)
-        pkt.flags += TYPE_FIN;
     pkt.len = len;
 
-    if (tcp->syn || tcp->fin || len != 0) {
+    if (len != 0) {
         switch (direction) {
         case DIR_OUT:
         {
@@ -106,7 +104,7 @@ int process(struct __sk_buff *skb, __u16 direction) {
 
         case DIR_IN:
             // In this case we received the packet, we can just send it.
-            bpf_perf_event_output(skb, &packets, 0 /* flags */, &pkt, sizeof(pkt));
+            bpf_perf_event_output(skb, &packets, BPF_F_CURRENT_CPU, &pkt, sizeof(pkt));
             break;
         }
     }
@@ -119,9 +117,6 @@ int process(struct __sk_buff *skb, __u16 direction) {
             .seq        = __constant_ntohl(tcp->seq),
         };
         memcpy(key.ip, pkt.dest_ip, sizeof(key.ip));
-        if (tcp->syn && tcp->ack)
-            // If it was the initial SYN, the AckSYN would be 0.
-            key.seq = 0;
 
         found = bpf_map_lookup_elem(&stash, &key);
         if (found != NULL) {
@@ -130,20 +125,20 @@ int process(struct __sk_buff *skb, __u16 direction) {
             found->rtt = pkt.ts - found->ts;
             found->ts = pkt.ts;
 
-            bpf_perf_event_output(skb, &packets, 0 /* flags */, found, sizeof(*found));
+            bpf_perf_event_output(skb, &packets, BPF_F_CURRENT_CPU, found, sizeof(*found));
         }
     }
 
     return KEEP;
 }
 
-SEC("cgroup/skb/ingress")
+SEC("cgroup_skb/ingress")
 int metrics_ingress(struct __sk_buff *skb)
 {
     return process(skb, DIR_IN);
 }
 
-SEC("cgroup/skb/egress")
+SEC("cgroup_skb/egress")
 int metrics_egress(struct __sk_buff *skb)
 {
     return process(skb, DIR_OUT);

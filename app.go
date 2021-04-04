@@ -41,7 +41,7 @@ func NewApp(ctrs Containers, log logger.Logger) (*App, error) {
 
 	app.mtrs = newMetricsService(10*time.Second, app.handleMetrics)
 
-	go pkts.Watch(app.handlePacket, app.handleLost, app.doneCh)
+	go pkts.Watch(app.handlePacket, app.handleLost)
 
 	go app.watchContainers()
 
@@ -75,11 +75,6 @@ func (a *App) watchContainers() {
 }
 
 func (a *App) handlePacket(pkt packet) {
-	// We can ignore syn and fin for now.
-	if pkt.Flags&flagSyn == flagSyn || pkt.Flags&flagFin == flagFin {
-		return
-	}
-
 	var (
 		sip, rip  [16]byte
 		bin, bout uint64
@@ -93,29 +88,33 @@ func (a *App) handlePacket(pkt packet) {
 		sip = pkt.SrcIP
 		rip = pkt.DestIP
 		bout = uint64(pkt.Len)
+	default:
+		a.log.Error("Unknown direction", "pkt", pkt)
 	}
 
+	// This is naive but in general true.
 	port := pkt.SrcPort
 	if pkt.DestPort < port {
 		port = pkt.DestPort
 	}
 
 	var proto string
-	switch {
-	case pkt.Protocol&protoUDP == protoUDP:
+	switch pkt.Protocol {
+	case protoUDP:
 		proto = "UDP"
-	case pkt.Protocol&protoTCP == protoTCP:
+	case protoTCP:
 		proto = "TCP"
 	}
 
 	rec := record{
-		Subject:  a.ctrs.Name(sip),
-		Remote:   a.ctrs.Name(rip),
-		Port:     port,
-		Protocol: proto,
-		BytesIn:  bin,
-		BytesOut: bout,
-		RTT:      float64(pkt.RTT) / 1000000, // Convert to ms.
+		Timestamp: pkt.Timestamp,
+		Subject:   a.ctrs.Name(sip),
+		Remote:    a.ctrs.Name(rip),
+		Port:      port,
+		Protocol:  proto,
+		BytesIn:   bin,
+		BytesOut:  bout,
+		RTT:       float64(pkt.RTT) / 1000000, // Convert to ms.
 	}
 
 	a.mtrs.Add(rec)
@@ -124,6 +123,7 @@ func (a *App) handlePacket(pkt packet) {
 func (a *App) handleMetrics(ms []metric) {
 	for _, m := range ms {
 		a.log.Info("Got",
+			"time", m.Timestamp,
 			"subj", m.Subject,
 			"remo", m.Remote,
 			"port", m.Port,

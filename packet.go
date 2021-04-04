@@ -4,12 +4,13 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"sync"
 	"unsafe"
 
-	"github.com/iovisor/gobpf/elf"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/perf"
 )
 
 /*
@@ -24,9 +25,9 @@ var bpf []byte
 const (
 	flagIn = 1 << iota
 	flagOut
-	flagSyn
-	flagFin
+)
 
+const (
 	protoUDP = iota + 1
 	protoTCP
 )
@@ -43,51 +44,43 @@ type packet struct {
 	Flags     uint16
 }
 
-type packetService struct {
-	mod     *elf.Module
-	inProg  *elf.CgroupProgram
-	outProg *elf.CgroupProgram
-	pktMap  *elf.PerfMap
+type objects struct {
+	Ingress *ebpf.Program `ebpf:"metrics_ingress"`
+	Egress  *ebpf.Program `ebpf:"metrics_egress"`
+	PktsMap *ebpf.Map     `ebpf:"packets"`
+}
 
-	mu      sync.Mutex
-	cgroups map[string]string
+type packetService struct {
+	objs objects
+	pkts *perf.Reader
+
+	mu   sync.Mutex
+	atch map[string][]link.Link
 
 	pktsCh chan []byte
 	lostCh chan uint64
 }
 
 func newPacketService() (*packetService, error) {
-	mod := elf.NewModuleFromReader(bytes.NewReader(bpf))
-
-	err := mod.Load(map[string]elf.SectionParams{})
+	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpf))
 	if err != nil {
 		return nil, fmt.Errorf("unable to load packet module: %w", err)
 	}
 
-	inProg := mod.CgroupProgram("cgroup/skb/ingress")
-	if inProg == nil {
-		return nil, errors.New("unable to find ingress program")
-	}
-	outProg := mod.CgroupProgram("cgroup/skb/egress")
-	if outProg == nil {
-		return nil, errors.New("unable to find egress program")
+	var objs objects
+	if err := spec.LoadAndAssign(&objs, nil); err != nil {
+		return nil, fmt.Errorf("unable to find required objects: %w", err)
 	}
 
-	pktsCh := make(chan []byte, 100)
-	lostCh := make(chan uint64, 100)
-	pktMap, err := elf.InitPerfMap(mod, "packets", pktsCh, lostCh)
+	pkts, err := perf.NewReader(objs.PktsMap, 8*1024)
 	if err != nil {
-		return nil, fmt.Errorf("unable to load map: %w", err)
+		return nil, fmt.Errorf("unable to create map: %w", err)
 	}
 
 	return &packetService{
-		mod:     mod,
-		inProg:  inProg,
-		outProg: outProg,
-		pktMap:  pktMap,
-		cgroups: map[string]string{},
-		pktsCh:  pktsCh,
-		lostCh:  lostCh,
+		objs: objs,
+		pkts: pkts,
+		atch: map[string][]link.Link{},
 	}, nil
 }
 
@@ -96,18 +89,32 @@ func (s *packetService) AttachContainer(name, path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.cgroups[name]; ok {
+	if _, ok := s.atch[name]; ok {
 		return nil
 	}
 
-	if err := elf.AttachCgroupProgram(s.inProg, path, elf.IngressType); err != nil {
+	var links []link.Link
+	l, err := link.AttachCgroup(link.CgroupOptions{
+		Path:    path,
+		Attach:  ebpf.AttachCGroupInetIngress,
+		Program: s.objs.Ingress,
+	})
+	if err != nil {
 		return fmt.Errorf("attach to container %s on path %q: %w", name, path, err)
 	}
-	if err := elf.AttachCgroupProgram(s.outProg, path, elf.EgressType); err != nil {
-		return fmt.Errorf("attach to container %s on path %q: %w", name, path, err)
-	}
+	links = append(links, l)
 
-	s.cgroups[name] = path
+	l, err = link.AttachCgroup(link.CgroupOptions{
+		Path:    path,
+		Attach:  ebpf.AttachCGroupInetEgress,
+		Program: s.objs.Egress,
+	})
+	if err != nil {
+		return fmt.Errorf("attach to container %s on path %q: %w", name, path, err)
+	}
+	links = append(links, l)
+
+	s.atch[name] = links
 
 	return nil
 }
@@ -117,55 +124,43 @@ func (s *packetService) DetachContainer(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.cgroups[name]; ok {
+	links, ok := s.atch[name]
+	if !ok {
 		return nil
 	}
 
-	path := s.cgroups[name]
-	if err := elf.DetachCgroupProgram(s.inProg, path, elf.IngressType); err != nil {
-		return fmt.Errorf("detach to container %s on path %q: %w", name, path, err)
-	}
-	if err := elf.DetachCgroupProgram(s.outProg, path, elf.EgressType); err != nil {
-		return fmt.Errorf("detach to container %s on path %q: %w", name, path, err)
+	for _, l := range links {
+		if err := l.Close(); err != nil {
+			return fmt.Errorf("detach to container %s: %w", name, err)
+		}
 	}
 
-	delete(s.cgroups, name)
+	delete(s.atch, name)
 
 	return nil
 }
 
-func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64), stopCh <-chan struct{}) {
-	s.pktMap.SetTimestampFunc(func(data *[]byte) uint64 {
-		eventC := (*C.struct_pkt_entry)(unsafe.Pointer(&(*data)[0]))
-		return uint64(eventC.ts) + 100*1000 // Delay data by 100us so not out of order.
-	})
-
-	s.pktMap.PollStart()
-	defer s.pktMap.PollStop()
-
+func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64)) {
 	// This may need to be scaled up to keep up with full load.
 	for {
-		select {
-		case <-stopCh:
+		rec, err := s.pkts.Read()
+		if err != nil {
 			return
-		case raw, ok := <-s.pktsCh:
-			if !ok {
-				return
-			}
-			pktFn(toPacket(&raw))
-		case lost, ok := <-s.lostCh:
-			if !ok {
-				return
-			}
-			lostFn(lost)
 		}
+
+		if rec.RawSample == nil {
+			lostFn(rec.LostSamples)
+			continue
+		}
+
+		pktFn(toPacket(rec.RawSample))
 	}
 }
 
-func toPacket(raw *[]byte) packet {
+func toPacket(raw []byte) packet {
 	var pkt packet
 
-	pktC := (*C.struct_pkt_entry)(unsafe.Pointer(&(*raw)[0]))
+	pktC := (*C.struct_pkt_entry)(unsafe.Pointer(&raw[0]))
 
 	pkt.Timestamp = uint64(pktC.ts)
 	pkt.SrcIP = toIP(pktC.src_ip)
@@ -191,16 +186,12 @@ func toIP(raw [4]C.__be32) [16]byte {
 
 // Close detaches all containers and closes the packet module.
 func (s *packetService) Close() error {
-	for name := range s.cgroups {
+	for name := range s.atch {
 		_ = s.DetachContainer(name)
 	}
 
-	if err := s.mod.Close(); err != nil {
-		return fmt.Errorf("unable to close packet module: %w", err)
-	}
+	_ = s.objs.Ingress.Close()
+	_ = s.objs.Egress.Close()
 
-	close(s.pktsCh)
-	close(s.lostCh)
-
-	return nil
+	return s.pkts.Close()
 }

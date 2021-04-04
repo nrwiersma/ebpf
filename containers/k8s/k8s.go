@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -12,8 +13,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	k8s "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 type endpointKey struct {
@@ -39,7 +40,8 @@ type Service struct {
 
 // New returns a kuberenetes container service.
 func New(node, cgroupRoot string, ignoreNs []string) (*Service, error) {
-	cfg, err := rest.InClusterConfig()
+	path := os.Getenv("KUBECONFIG")
+	cfg, err := clientcmd.BuildConfigFromFlags("", path)
 	if err != nil {
 		return nil, err
 	}

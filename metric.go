@@ -12,13 +12,14 @@ import (
 )
 
 type record struct {
-	Subject  string
-	Remote   string
-	Port     uint16
-	Protocol string
-	BytesIn  uint64
-	BytesOut uint64
-	RTT      float64
+	Timestamp uint64
+	Subject   string
+	Remote    string
+	Port      uint16
+	Protocol  string
+	BytesIn   uint64
+	BytesOut  uint64
+	RTT       float64
 }
 
 type metric struct {
