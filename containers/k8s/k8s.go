@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,18 +16,19 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-type endpointKey struct {
-	IP   [16]byte
-	Port uint16
+type eventFactory interface {
+	AddEvents(pod *corev1.Pod) []containers.ContainerEvent
+	UpdateEvents(oldPod, newPod *corev1.Pod) []containers.ContainerEvent
+	DeleteEvents(pod *corev1.Pod) []containers.ContainerEvent
 }
 
 // Service is a kubernetes container service.
 type Service struct {
-	node       string
-	ignoreNS   []string
-	cgroupRoot string
+	node     string
+	ignoreNS []string
 
-	events chan containers.ContainerEvent
+	eventFac eventFactory
+	events   chan containers.ContainerEvent
 
 	// TODO: This should be switched for something with a faster
 	//		 read path. Perhaps iradix.
@@ -58,12 +58,12 @@ func New(node, cgroupRoot string, ignoreNs []string) (*Service, error) {
 // given kubernetes client.
 func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []string) (*Service, error) {
 	svc := &Service{
-		node:       node,
-		ignoreNS:   ignoreNs,
-		cgroupRoot: cgroupRoot,
-		events:     make(chan containers.ContainerEvent, 100),
-		names:      map[[16]byte]string{},
-		doneCh:     make(chan struct{}),
+		node:     node,
+		ignoreNS: ignoreNs,
+		eventFac: podEvents{cgroupRoot: cgroupRoot},
+		events:   make(chan containers.ContainerEvent, 100),
+		names:    map[[16]byte]string{},
+		doneCh:   make(chan struct{}),
 	}
 
 	fac := informers.NewSharedInformerFactory(client, time.Minute)
@@ -101,14 +101,13 @@ func (s *Service) onAdd() func(obj interface{}) {
 
 			s.addName(pod.Status.PodIP, name)
 
-			if !s.shouldEmit(pod) || pod.Status.Phase != corev1.PodRunning {
+			if !s.shouldEmit(pod) {
 				return
 			}
 
-			s.events <- containers.ContainerEvent{
-				Type:       containers.Added,
-				Name:       name,
-				CGroupPath: cgroupPath(s.cgroupRoot, pod),
+			evnts := s.eventFac.AddEvents(pod)
+			for _, e := range evnts {
+				s.events <- e
 			}
 
 		case *corev1.Service:
@@ -137,21 +136,10 @@ func (s *Service) onUpdate() func(oldObj, newObj interface{}) {
 				return
 			}
 
-			evnt := containers.ContainerEvent{
-				Name:       name,
-				CGroupPath: cgroupPath(s.cgroupRoot, newPod),
+			evnts := s.eventFac.UpdateEvents(oldPod, newPod)
+			for _, e := range evnts {
+				s.events <- e
 			}
-
-			switch newPod.Status.Phase {
-			case corev1.PodPending:
-				return
-			case corev1.PodRunning:
-				evnt.Type = containers.Added
-			default:
-				evnt.Type = containers.Removed
-			}
-
-			s.events <- evnt
 
 		case *corev1.Service:
 			newSvc := v
@@ -180,10 +168,9 @@ func (s *Service) onDelete() func(obj interface{}) {
 				return
 			}
 
-			s.events <- containers.ContainerEvent{
-				Type:       containers.Removed,
-				Name:       pod.Namespace + "/" + pod.Name,
-				CGroupPath: cgroupPath(s.cgroupRoot, pod),
+			evnts := s.eventFac.DeleteEvents(pod)
+			for _, e := range evnts {
+				s.events <- e
 			}
 
 		case *corev1.Service:
@@ -263,8 +250,4 @@ func (s *Service) Close() error {
 	close(s.events)
 
 	return nil
-}
-
-func cgroupPath(root string, pod *corev1.Pod) string {
-	return fmt.Sprintf("%s/kubepods/%s/pod%s", root, strings.ToLower(string(pod.Status.QOSClass)), string(pod.UID))
 }
