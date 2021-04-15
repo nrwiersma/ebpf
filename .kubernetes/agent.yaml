@@ -65,6 +65,8 @@ spec:
           name: agent
           command:
             - "/agent"
+            - "--log.level=debug"
+            - "--containers"
           env:
             - name: NODE
               valueFrom:

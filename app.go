@@ -11,6 +11,7 @@ import (
 type Containers interface {
 	Events() <-chan containers.ContainerEvent
 	Name(ip [16]byte) string
+	Close() error
 }
 
 // App is the core orchestrator.

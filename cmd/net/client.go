@@ -36,8 +36,6 @@ func runClient(c *cli.Context) error {
 
 			if res.StatusCode != 200 {
 				fmt.Println("could not send request")
-			} else {
-				fmt.Println("sent request")
 			}
 		}
 	}()

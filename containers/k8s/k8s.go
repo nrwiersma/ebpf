@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -13,22 +12,29 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	k8s "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-type endpointKey struct {
-	IP   [16]byte
-	Port uint16
+type eventFactory interface {
+	AddEvents(pod *corev1.Pod) []containers.ContainerEvent
+	UpdateEvents(oldPod, newPod *corev1.Pod) []containers.ContainerEvent
+	DeleteEvents(pod *corev1.Pod) []containers.ContainerEvent
+}
+
+// ServiceOpts sets options for the service.
+type ServiceOpts struct {
+	ContainerEvents bool
 }
 
 // Service is a kubernetes container service.
 type Service struct {
-	node       string
-	ignoreNS   []string
-	cgroupRoot string
+	node     string
+	ignoreNS []string
 
-	events chan containers.ContainerEvent
+	eventFac eventFactory
+	events   chan containers.ContainerEvent
 
 	// TODO: This should be switched for something with a faster
 	//		 read path. Perhaps iradix.
@@ -39,9 +45,8 @@ type Service struct {
 }
 
 // New returns a kuberenetes container service.
-func New(node, cgroupRoot string, ignoreNs []string) (*Service, error) {
-	path := os.Getenv("KUBECONFIG")
-	cfg, err := clientcmd.BuildConfigFromFlags("", path)
+func New(node, cgroupRoot string, ignoreNs []string, opts ServiceOpts) (*Service, error) {
+	cfg, err := k8sConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -51,19 +56,26 @@ func New(node, cgroupRoot string, ignoreNs []string) (*Service, error) {
 		return nil, err
 	}
 
-	return NewWithClient(client, node, cgroupRoot, ignoreNs)
+	return NewWithClient(client, node, cgroupRoot, ignoreNs, opts)
 }
 
 // NewWithClient returns a kuberenetes container service using the
 // given kubernetes client.
-func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []string) (*Service, error) {
+func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []string, opts ServiceOpts) (*Service, error) {
+	var eventFac eventFactory
+	if opts.ContainerEvents {
+		eventFac = containerEvents{cgroupRoot: cgroupRoot}
+	} else {
+		eventFac = podEvents{cgroupRoot: cgroupRoot}
+	}
+
 	svc := &Service{
-		node:       node,
-		ignoreNS:   ignoreNs,
-		cgroupRoot: cgroupRoot,
-		events:     make(chan containers.ContainerEvent, 100),
-		names:      map[[16]byte]string{},
-		doneCh:     make(chan struct{}),
+		node:     node,
+		ignoreNS: ignoreNs,
+		eventFac: eventFac,
+		events:   make(chan containers.ContainerEvent, 100),
+		names:    map[[16]byte]string{},
+		doneCh:   make(chan struct{}),
 	}
 
 	fac := informers.NewSharedInformerFactory(client, time.Minute)
@@ -78,7 +90,7 @@ func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []st
 		DeleteFunc: svc.onDelete(),
 	})
 
-	go fac.Start(svc.doneCh)
+	fac.Start(svc.doneCh)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -101,14 +113,13 @@ func (s *Service) onAdd() func(obj interface{}) {
 
 			s.addName(pod.Status.PodIP, name)
 
-			if !s.shouldEmit(pod) || pod.Status.Phase != corev1.PodRunning {
+			if !s.shouldEmit(pod) {
 				return
 			}
 
-			s.events <- containers.ContainerEvent{
-				Type:       containers.Added,
-				Name:       name,
-				CGroupPath: cgroupPath(s.cgroupRoot, pod),
+			evnts := s.eventFac.AddEvents(pod)
+			for _, e := range evnts {
+				s.events <- e
 			}
 
 		case *corev1.Service:
@@ -137,21 +148,10 @@ func (s *Service) onUpdate() func(oldObj, newObj interface{}) {
 				return
 			}
 
-			evnt := containers.ContainerEvent{
-				Name:       name,
-				CGroupPath: cgroupPath(s.cgroupRoot, newPod),
+			evnts := s.eventFac.UpdateEvents(oldPod, newPod)
+			for _, e := range evnts {
+				s.events <- e
 			}
-
-			switch newPod.Status.Phase {
-			case corev1.PodPending:
-				return
-			case corev1.PodRunning:
-				evnt.Type = containers.Added
-			default:
-				evnt.Type = containers.Removed
-			}
-
-			s.events <- evnt
 
 		case *corev1.Service:
 			newSvc := v
@@ -180,10 +180,9 @@ func (s *Service) onDelete() func(obj interface{}) {
 				return
 			}
 
-			s.events <- containers.ContainerEvent{
-				Type:       containers.Removed,
-				Name:       pod.Namespace + "/" + pod.Name,
-				CGroupPath: cgroupPath(s.cgroupRoot, pod),
+			evnts := s.eventFac.DeleteEvents(pod)
+			for _, e := range evnts {
+				s.events <- e
 			}
 
 		case *corev1.Service:
@@ -265,6 +264,9 @@ func (s *Service) Close() error {
 	return nil
 }
 
-func cgroupPath(root string, pod *corev1.Pod) string {
-	return fmt.Sprintf("%s/kubepods/%s/pod%s", root, strings.ToLower(string(pod.Status.QOSClass)), string(pod.UID))
+func k8sConfig() (*rest.Config, error) {
+	if path := os.Getenv("KUBECONFIG"); path != "" {
+		return clientcmd.BuildConfigFromFlags("", path)
+	}
+	return rest.InClusterConfig()
 }
