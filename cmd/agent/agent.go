@@ -8,7 +8,6 @@ import (
 
 	"github.com/hamba/logger"
 	"github.com/nrwiersma/ebpf"
-	"github.com/nrwiersma/ebpf/containers/k8s"
 	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
@@ -31,7 +30,7 @@ func runAgent(c *cli.Context) error {
 		return err
 	}
 
-	ctrs, err := k8s.New(c.String(flagNode), cgroups.CgroupRoot(), []string{"kube-system", c.String(flagNs)})
+	ctrs, err := newContainersProvider(c, cgroups.CgroupRoot())
 	if err != nil {
 		return err
 	}
