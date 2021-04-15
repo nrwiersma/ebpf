@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	k8s "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -20,6 +21,11 @@ type eventFactory interface {
 	AddEvents(pod *corev1.Pod) []containers.ContainerEvent
 	UpdateEvents(oldPod, newPod *corev1.Pod) []containers.ContainerEvent
 	DeleteEvents(pod *corev1.Pod) []containers.ContainerEvent
+}
+
+// ServiceOpts sets options for the service.
+type ServiceOpts struct {
+	ContainerEvents bool
 }
 
 // Service is a kubernetes container service.
@@ -39,9 +45,8 @@ type Service struct {
 }
 
 // New returns a kuberenetes container service.
-func New(node, cgroupRoot string, ignoreNs []string) (*Service, error) {
-	path := os.Getenv("KUBECONFIG")
-	cfg, err := clientcmd.BuildConfigFromFlags("", path)
+func New(node, cgroupRoot string, ignoreNs []string, opts ServiceOpts) (*Service, error) {
+	cfg, err := k8sConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -51,16 +56,23 @@ func New(node, cgroupRoot string, ignoreNs []string) (*Service, error) {
 		return nil, err
 	}
 
-	return NewWithClient(client, node, cgroupRoot, ignoreNs)
+	return NewWithClient(client, node, cgroupRoot, ignoreNs, opts)
 }
 
 // NewWithClient returns a kuberenetes container service using the
 // given kubernetes client.
-func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []string) (*Service, error) {
+func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []string, opts ServiceOpts) (*Service, error) {
+	var eventFac eventFactory
+	if opts.ContainerEvents {
+		eventFac = containerEvents{cgroupRoot: cgroupRoot}
+	} else {
+		eventFac = podEvents{cgroupRoot: cgroupRoot}
+	}
+
 	svc := &Service{
 		node:     node,
 		ignoreNS: ignoreNs,
-		eventFac: podEvents{cgroupRoot: cgroupRoot},
+		eventFac: eventFac,
 		events:   make(chan containers.ContainerEvent, 100),
 		names:    map[[16]byte]string{},
 		doneCh:   make(chan struct{}),
@@ -250,4 +262,11 @@ func (s *Service) Close() error {
 	close(s.events)
 
 	return nil
+}
+
+func k8sConfig() (*rest.Config, error) {
+	if path := os.Getenv("KUBECONFIG"); path != "" {
+		return clientcmd.BuildConfigFromFlags("", path)
+	}
+	return rest.InClusterConfig()
 }
