@@ -6,7 +6,7 @@ import (
 
 	"github.com/hamba/logger"
 	"github.com/nrwiersma/ebpf"
-	"github.com/nrwiersma/ebpf/containers/k8s"
+	"github.com/nrwiersma/ebpf/container/k8s"
 	"github.com/urfave/cli/v2"
 )
 

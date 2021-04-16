@@ -19,10 +19,10 @@ build:
 		-I$(LINUX_HEADERS)/include/uapi \
 		-I$(LINUX_HEADERS)/include/generated/uapi \
 		-I$(LINUX_HEADERS)/include \
-		-O2 -emit-llvm -g -c metrics.c \
-		-o - | llc -march=bpf -filetype=obj -o "${DEST_DIR}/metrics.o"
+		-O2 -emit-llvm -g -c metrics_sock.c \
+		-o - | llc -march=bpf -filetype=obj -o "${DEST_DIR}/metrics_sock.o"
 .PHONY: build
 
 dump: build
-	@llvm-objdump -S -no-show-raw-insn "${DEST_DIR}/metrics.o" > "${DEST_DIR}/metrics.s"
+	@llvm-objdump -S -no-show-raw-insn "${DEST_DIR}/metrics_sock.o" > "${DEST_DIR}/metrics_sock.s"
 .PHONY: dump

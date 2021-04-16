@@ -4,21 +4,28 @@ import (
 	"time"
 
 	"github.com/hamba/logger"
-	"github.com/nrwiersma/ebpf/containers"
+	"github.com/nrwiersma/ebpf/container"
+	"github.com/nrwiersma/ebpf/packet"
 )
 
 // Containers represents a container service.
 type Containers interface {
-	Events() <-chan containers.ContainerEvent
+	Events() <-chan container.ContainerEvent
 	Name(ip [16]byte) string
 	Close() error
+}
+
+type Packets interface {
+	AttachContainer(name, path string) error
+	DetachContainer(name string) error
+	Watch(pktFn func(pkt packet.Packet), lostFn func(cnt uint64))
 }
 
 // App is the core orchestrator.
 type App struct {
 	ctrs Containers
+	pkts Packets
 
-	pkts *packetService
 	mtrs *metricService
 
 	doneCh chan struct{}
@@ -27,12 +34,7 @@ type App struct {
 }
 
 // NewApp returns an application.
-func NewApp(ctrs Containers, log logger.Logger) (*App, error) {
-	pkts, err := newPacketService()
-	if err != nil {
-		return nil, err
-	}
-
+func NewApp(ctrs Containers, pkts Packets, log logger.Logger) (*App, error) {
 	app := &App{
 		ctrs:   ctrs,
 		pkts:   pkts,
@@ -53,7 +55,7 @@ func (a *App) watchContainers() {
 	events := a.ctrs.Events()
 
 	for {
-		var evnt containers.ContainerEvent
+		var evnt container.ContainerEvent
 		select {
 		case <-a.doneCh:
 			return
@@ -61,11 +63,11 @@ func (a *App) watchContainers() {
 		}
 
 		switch evnt.Type {
-		case containers.Added:
+		case container.Added:
 			if err := a.pkts.AttachContainer(evnt.Name, evnt.CGroupPath); err != nil {
 				a.log.Error("Unable to attach to container", "error", err)
 			}
-		case containers.Removed:
+		case container.Removed:
 			if err := a.pkts.DetachContainer(evnt.Name); err != nil {
 				a.log.Error("Unable to detach to container", "error", err)
 			}
@@ -75,17 +77,17 @@ func (a *App) watchContainers() {
 	}
 }
 
-func (a *App) handlePacket(pkt packet) {
+func (a *App) handlePacket(pkt packet.Packet) {
 	var (
 		sip, rip  [16]byte
 		bin, bout uint64
 	)
 	switch {
-	case pkt.Flags&flagIn == flagIn:
+	case pkt.Flags&packet.FlagIn == packet.FlagIn:
 		sip = pkt.DestIP
 		rip = pkt.SrcIP
 		bin = uint64(pkt.Len)
-	case pkt.Flags&flagOut == flagOut:
+	case pkt.Flags&packet.FlagOut == packet.FlagOut:
 		sip = pkt.SrcIP
 		rip = pkt.DestIP
 		bout = uint64(pkt.Len)
@@ -101,9 +103,9 @@ func (a *App) handlePacket(pkt packet) {
 
 	var proto string
 	switch pkt.Proto {
-	case protoUDP:
+	case packet.ProtoUDP:
 		proto = "UDP"
-	case protoTCP:
+	case packet.ProtoTCP:
 		proto = "TCP"
 	}
 
@@ -145,8 +147,6 @@ func (a *App) handleLost(cnt uint64) {
 // Close closes the application.
 func (a *App) Close() error {
 	close(a.doneCh)
-
-	_ = a.pkts.Close()
 
 	return a.mtrs.Close()
 }

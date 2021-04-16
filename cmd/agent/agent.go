@@ -6,6 +6,7 @@ import (
 	"os/signal"
 
 	"github.com/nrwiersma/ebpf"
+	"github.com/nrwiersma/ebpf/packet"
 	"github.com/nrwiersma/ebpf/pkg/cgroups"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
@@ -39,7 +40,13 @@ func runAgent(c *cli.Context) error {
 	}
 	defer ctrs.Close()
 
-	app, err := ebpf.NewApp(ctrs, log)
+	pkts, err := packet.NewCGroup()
+	if err != nil {
+		return err
+	}
+	defer pkts.Close()
+
+	app, err := ebpf.NewApp(ctrs, pkts, log)
 	if err != nil {
 		return err
 	}

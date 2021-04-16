@@ -9,7 +9,7 @@
 #include <uapi/linux/tcp.h>
 #include <arpa/inet.h>
 #include "bpf_helpers.h"
-#include "metrics.h"
+#include "maps.h"
 
 #define KEEP 1
 #define DROP 0

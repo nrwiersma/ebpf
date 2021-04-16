@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nrwiersma/ebpf/containers"
+	"github.com/nrwiersma/ebpf/container"
 	"inet.af/netaddr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
@@ -18,9 +18,9 @@ import (
 )
 
 type eventFactory interface {
-	AddEvents(pod *corev1.Pod) []containers.ContainerEvent
-	UpdateEvents(oldPod, newPod *corev1.Pod) []containers.ContainerEvent
-	DeleteEvents(pod *corev1.Pod) []containers.ContainerEvent
+	AddEvents(pod *corev1.Pod) []container.ContainerEvent
+	UpdateEvents(oldPod, newPod *corev1.Pod) []container.ContainerEvent
+	DeleteEvents(pod *corev1.Pod) []container.ContainerEvent
 }
 
 // ServiceOptsFunc represents a configuration function
@@ -49,7 +49,7 @@ type Service struct {
 	cgroupRoot string
 
 	eventFac eventFactory
-	events   chan containers.ContainerEvent
+	events   chan container.ContainerEvent
 
 	// TODO: This should be switched for something with a faster
 	//		 read path. Perhaps iradix.
@@ -84,7 +84,7 @@ func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []st
 		ignoreNS:   ignoreNs,
 		cgroupRoot: cgroupRoot,
 		eventFac:   podEvents{cgroupRoot: cgroupRoot},
-		events:     make(chan containers.ContainerEvent, 100),
+		events:     make(chan container.ContainerEvent, 100),
 		names:      map[[16]byte]string{},
 		doneCh:     make(chan struct{}),
 	}
@@ -276,7 +276,7 @@ func ipToBytes(v string) [16]byte {
 }
 
 // Events returns a channel of pod events.
-func (s *Service) Events() <-chan containers.ContainerEvent {
+func (s *Service) Events() <-chan container.ContainerEvent {
 	return s.events
 }
 

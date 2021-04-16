@@ -1,8 +1,7 @@
-package ebpf
+package packet
 
 import (
 	"bytes"
-	_ "embed"
 	"fmt"
 	"sync"
 	"unsafe"
@@ -11,27 +10,25 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/hashicorp/go-multierror"
+	"github.com/nrwiersma/ebpf/bpf"
 )
-
-//go:embed bpf/dist/metrics.o
-var bpf []byte
 
 // Packet flags.
 const (
-	flagIn = 1 << iota
-	flagOut
+	FlagIn = 1 << iota
+	FlagOut
 )
 
 // Packet protocols.
 const (
-	protoUDP = iota + 1
-	protoTCP
+	ProtoUDP = iota + 1
+	ProtoTCP
 )
 
-// packet contains network packet data.
+// Packet contains network packet data.
 //
-// Must stay in sync with bpf/metrics.h pkt_entry.
-type packet struct {
+// Must stay in sync with bpf/maps.h pkt_entry.
+type Packet struct {
 	Timestamp uint64
 	SrcIP     [16]byte
 	DestIP    [16]byte
@@ -43,8 +40,8 @@ type packet struct {
 	Flags     uint16
 }
 
-func toPacket(raw []byte) packet {
-	return *(*packet)(unsafe.Pointer(&raw[0]))
+func toPacket(raw []byte) Packet {
+	return *(*Packet)(unsafe.Pointer(&raw[0]))
 }
 
 type objects struct {
@@ -53,7 +50,7 @@ type objects struct {
 	PktsMap *ebpf.Map     `ebpf:"packets"`
 }
 
-type packetService struct {
+type CGroup struct {
 	objs objects
 	pkts *perf.Reader
 
@@ -61,8 +58,8 @@ type packetService struct {
 	atch map[string][]link.Link
 }
 
-func newPacketService() (*packetService, error) {
-	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpf))
+func NewCGroup() (*CGroup, error) {
+	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpf.MetricsSock))
 	if err != nil {
 		return nil, fmt.Errorf("unable to load packet module: %w", err)
 	}
@@ -77,7 +74,7 @@ func newPacketService() (*packetService, error) {
 		return nil, fmt.Errorf("unable to create map: %w", err)
 	}
 
-	return &packetService{
+	return &CGroup{
 		objs: objs,
 		pkts: pkts,
 		atch: map[string][]link.Link{},
@@ -85,7 +82,7 @@ func newPacketService() (*packetService, error) {
 }
 
 // AttachContainer attaches to the container.
-func (s *packetService) AttachContainer(name, path string) error {
+func (s *CGroup) AttachContainer(name, path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,7 +118,7 @@ func (s *packetService) AttachContainer(name, path string) error {
 }
 
 // DetachContainer detaches the container.
-func (s *packetService) DetachContainer(name string) error {
+func (s *CGroup) DetachContainer(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -143,7 +140,7 @@ func (s *packetService) DetachContainer(name string) error {
 }
 
 // Watch reads packets from perf events.
-func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64)) {
+func (s *CGroup) Watch(pktFn func(pkt Packet), lostFn func(cnt uint64)) {
 	// This may need to be scaled up to keep up with full load.
 	for {
 		rec, err := s.pkts.Read()
@@ -161,7 +158,7 @@ func (s *packetService) Watch(pktFn func(pkt packet), lostFn func(cnt uint64)) {
 }
 
 // Close detaches all containers and closes the packet module.
-func (s *packetService) Close() error {
+func (s *CGroup) Close() error {
 	var errs error
 
 	for name := range s.atch {

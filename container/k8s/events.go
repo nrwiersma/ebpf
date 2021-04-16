@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nrwiersma/ebpf/containers"
+	"github.com/nrwiersma/ebpf/container"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -12,20 +12,20 @@ type podEvents struct {
 	cgroupRoot string
 }
 
-func (e podEvents) AddEvents(pod *corev1.Pod) []containers.ContainerEvent {
+func (e podEvents) AddEvents(pod *corev1.Pod) []container.ContainerEvent {
 	if pod.Status.Phase != corev1.PodRunning {
 		return nil
 	}
 
-	return []containers.ContainerEvent{{
-		Type:       containers.Added,
+	return []container.ContainerEvent{{
+		Type:       container.Added,
 		Name:       e.name(pod),
 		CGroupPath: e.cgroupPath(pod),
 	}}
 }
 
-func (e podEvents) UpdateEvents(_, newPod *corev1.Pod) []containers.ContainerEvent {
-	evnt := containers.ContainerEvent{
+func (e podEvents) UpdateEvents(_, newPod *corev1.Pod) []container.ContainerEvent {
+	evnt := container.ContainerEvent{
 		Name:       e.name(newPod),
 		CGroupPath: e.cgroupPath(newPod),
 	}
@@ -34,16 +34,16 @@ func (e podEvents) UpdateEvents(_, newPod *corev1.Pod) []containers.ContainerEve
 	case corev1.PodPending:
 		return nil
 	case corev1.PodRunning:
-		evnt.Type = containers.Added
+		evnt.Type = container.Added
 	default:
-		evnt.Type = containers.Removed
+		evnt.Type = container.Removed
 	}
-	return []containers.ContainerEvent{evnt}
+	return []container.ContainerEvent{evnt}
 }
 
-func (e podEvents) DeleteEvents(pod *corev1.Pod) []containers.ContainerEvent {
-	return []containers.ContainerEvent{{
-		Type:       containers.Removed,
+func (e podEvents) DeleteEvents(pod *corev1.Pod) []container.ContainerEvent {
+	return []container.ContainerEvent{{
+		Type:       container.Removed,
 		Name:       e.name(pod),
 		CGroupPath: e.cgroupPath(pod),
 	}}
@@ -61,15 +61,15 @@ type containerEvents struct {
 	cgroupRoot string
 }
 
-func (e containerEvents) AddEvents(pod *corev1.Pod) []containers.ContainerEvent {
-	var events []containers.ContainerEvent
+func (e containerEvents) AddEvents(pod *corev1.Pod) []container.ContainerEvent {
+	var events []container.ContainerEvent
 	for _, cont := range pod.Status.ContainerStatuses {
 		if cont.State.Running == nil {
 			continue
 		}
 
-		events = append(events, containers.ContainerEvent{
-			Type:       containers.Added,
+		events = append(events, container.ContainerEvent{
+			Type:       container.Added,
 			Name:       e.name(pod, cont),
 			CGroupPath: e.cgroupPath(pod, cont),
 		})
@@ -78,10 +78,10 @@ func (e containerEvents) AddEvents(pod *corev1.Pod) []containers.ContainerEvent 
 	return events
 }
 
-func (e containerEvents) UpdateEvents(_, newPod *corev1.Pod) []containers.ContainerEvent {
-	var events []containers.ContainerEvent
+func (e containerEvents) UpdateEvents(_, newPod *corev1.Pod) []container.ContainerEvent {
+	var events []container.ContainerEvent
 	for _, cont := range newPod.Status.ContainerStatuses {
-		evnt := containers.ContainerEvent{
+		evnt := container.ContainerEvent{
 			Name:       newPod.Namespace + "/" + newPod.Name,
 			CGroupPath: e.cgroupPath(newPod, cont),
 		}
@@ -90,9 +90,9 @@ func (e containerEvents) UpdateEvents(_, newPod *corev1.Pod) []containers.Contai
 		case cont.State.Waiting != nil:
 			return nil
 		case cont.State.Running != nil:
-			evnt.Type = containers.Added
+			evnt.Type = container.Added
 		default:
-			evnt.Type = containers.Removed
+			evnt.Type = container.Removed
 		}
 
 		events = append(events, evnt)
@@ -101,11 +101,11 @@ func (e containerEvents) UpdateEvents(_, newPod *corev1.Pod) []containers.Contai
 	return events
 }
 
-func (e containerEvents) DeleteEvents(pod *corev1.Pod) []containers.ContainerEvent {
-	var events []containers.ContainerEvent
+func (e containerEvents) DeleteEvents(pod *corev1.Pod) []container.ContainerEvent {
+	var events []container.ContainerEvent
 	for _, cont := range pod.Status.ContainerStatuses {
-		events = append(events, containers.ContainerEvent{
-			Type:       containers.Removed,
+		events = append(events, container.ContainerEvent{
+			Type:       container.Removed,
 			Name:       e.name(pod, cont),
 			CGroupPath: e.cgroupPath(pod, cont),
 		})

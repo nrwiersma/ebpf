@@ -1,4 +1,4 @@
-package containers
+package container
 
 // EventType is the type of the event.
 type EventType int
