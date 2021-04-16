@@ -54,7 +54,7 @@ build-docker: go-build-image
 		$(GO_BUILD_TAG)
 .PHONY: build-docker
 
-image: build-docker
+image: build
 	@echo "==> Building Docker image"
 	@docker build $(DOCKER_NOCACHE) -t $(DOCKER_IMAGE) .
 .PHONY: image
