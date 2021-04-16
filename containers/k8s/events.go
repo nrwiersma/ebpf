@@ -64,7 +64,7 @@ type containerEvents struct {
 func (e containerEvents) AddEvents(pod *corev1.Pod) []containers.ContainerEvent {
 	var events []containers.ContainerEvent
 	for _, cont := range pod.Status.ContainerStatuses {
-		if cont.State.Running != nil {
+		if cont.State.Running == nil {
 			continue
 		}
 

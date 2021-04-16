@@ -33,7 +33,7 @@ func runAgent(c *cli.Context) error {
 		return err
 	}
 
-	ctrs, err := newContainersProvider(c, cgroups.CgroupRoot())
+	ctrs, err := newContainersProvider(c, cgroups.CgroupRoot(), log)
 	if err != nil {
 		return err
 	}

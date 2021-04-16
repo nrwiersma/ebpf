@@ -29,9 +29,12 @@ func newLogger(c *cli.Context) (logger.Logger, error) {
 	return logger.New(h), nil
 }
 
-func newContainersProvider(c *cli.Context, cgroupRoot string) (ebpf.Containers, error) {
+func newContainersProvider(c *cli.Context, cgroupRoot string, log logger.Logger) (ebpf.Containers, error) {
 	node := c.String(flagNode)
 	ns := []string{"kube-system", c.String(flagNs)}
 
-	return k8s.New(node, cgroupRoot, ns, k8s.ServiceOpts{ContainerEvents: c.Bool(flagContainers)})
+	return k8s.New(node, cgroupRoot, ns,
+		k8s.WithContainers(c.Bool(flagContainers)),
+		k8s.WithDebug(log.Debug),
+	)
 }

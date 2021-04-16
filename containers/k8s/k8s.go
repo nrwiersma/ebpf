@@ -23,15 +23,30 @@ type eventFactory interface {
 	DeleteEvents(pod *corev1.Pod) []containers.ContainerEvent
 }
 
-// ServiceOpts sets options for the service.
-type ServiceOpts struct {
-	ContainerEvents bool
+// ServiceOptsFunc represents a configuration function
+// for the service.
+type ServiceOptsFunc func(s *Service)
+
+// WithContainers configures the service to watch container
+// events instead of pod events.
+func WithContainers(use bool) ServiceOptsFunc {
+	return func(s *Service) {
+		s.eventFac = containerEvents{cgroupRoot: s.cgroupRoot}
+	}
+}
+
+// WithDebug configures the service with a debug log function.
+func WithDebug(fn func(string, ...interface{})) ServiceOptsFunc {
+	return func(s *Service) {
+		s.debugFn = fn
+	}
 }
 
 // Service is a kubernetes container service.
 type Service struct {
-	node     string
-	ignoreNS []string
+	node       string
+	ignoreNS   []string
+	cgroupRoot string
 
 	eventFac eventFactory
 	events   chan containers.ContainerEvent
@@ -42,10 +57,12 @@ type Service struct {
 	names map[[16]byte]string
 
 	doneCh chan struct{}
+
+	debugFn func(string, ...interface{})
 }
 
 // New returns a kuberenetes container service.
-func New(node, cgroupRoot string, ignoreNs []string, opts ServiceOpts) (*Service, error) {
+func New(node, cgroupRoot string, ignoreNs []string, opts ...ServiceOptsFunc) (*Service, error) {
 	cfg, err := k8sConfig()
 	if err != nil {
 		return nil, err
@@ -56,26 +73,24 @@ func New(node, cgroupRoot string, ignoreNs []string, opts ServiceOpts) (*Service
 		return nil, err
 	}
 
-	return NewWithClient(client, node, cgroupRoot, ignoreNs, opts)
+	return NewWithClient(client, node, cgroupRoot, ignoreNs, opts...)
 }
 
 // NewWithClient returns a kuberenetes container service using the
 // given kubernetes client.
-func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []string, opts ServiceOpts) (*Service, error) {
-	var eventFac eventFactory
-	if opts.ContainerEvents {
-		eventFac = containerEvents{cgroupRoot: cgroupRoot}
-	} else {
-		eventFac = podEvents{cgroupRoot: cgroupRoot}
+func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []string, opts ...ServiceOptsFunc) (*Service, error) {
+	svc := &Service{
+		node:       node,
+		ignoreNS:   ignoreNs,
+		cgroupRoot: cgroupRoot,
+		eventFac:   podEvents{cgroupRoot: cgroupRoot},
+		events:     make(chan containers.ContainerEvent, 100),
+		names:      map[[16]byte]string{},
+		doneCh:     make(chan struct{}),
 	}
 
-	svc := &Service{
-		node:     node,
-		ignoreNS: ignoreNs,
-		eventFac: eventFac,
-		events:   make(chan containers.ContainerEvent, 100),
-		names:    map[[16]byte]string{},
-		doneCh:   make(chan struct{}),
+	for _, opt := range opts {
+		opt(svc)
 	}
 
 	fac := informers.NewSharedInformerFactory(client, time.Minute)
@@ -92,6 +107,8 @@ func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []st
 
 	fac.Start(svc.doneCh)
 
+	svc.debug("Waiting for k8s informers to sync...")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -101,7 +118,17 @@ func NewWithClient(client *k8s.Clientset, node, cgroupRoot string, ignoreNs []st
 		}
 	}
 
+	svc.debug("K8s informers to synced")
+
 	return svc, nil
+}
+
+func (s *Service) debug(msg string, ctx ...interface{}) {
+	if s.debugFn == nil {
+		return
+	}
+
+	s.debugFn(msg, ctx...)
 }
 
 func (s *Service) onAdd() func(obj interface{}) {
@@ -117,8 +144,11 @@ func (s *Service) onAdd() func(obj interface{}) {
 				return
 			}
 
+			s.debug("Pod added", "name", name)
+
 			evnts := s.eventFac.AddEvents(pod)
 			for _, e := range evnts {
+				s.debug("Event", "type", e.Type, "name", e.Name)
 				s.events <- e
 			}
 
@@ -148,8 +178,11 @@ func (s *Service) onUpdate() func(oldObj, newObj interface{}) {
 				return
 			}
 
+			s.debug("Pod updated", "name", name)
+
 			evnts := s.eventFac.UpdateEvents(oldPod, newPod)
 			for _, e := range evnts {
+				s.debug("Event", "type", e.Type, "name", e.Name)
 				s.events <- e
 			}
 
@@ -180,8 +213,11 @@ func (s *Service) onDelete() func(obj interface{}) {
 				return
 			}
 
+			s.debug("Pod deleted", "name", pod.Namespace+"/"+pod.Name)
+
 			evnts := s.eventFac.DeleteEvents(pod)
 			for _, e := range evnts {
+				s.debug("Event", "type", e.Type, "name", e.Name)
 				s.events <- e
 			}
 
