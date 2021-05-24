@@ -4,10 +4,9 @@ import (
 	"log"
 	"os"
 
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/urfave/cli/v2"
 )
-
-import _ "github.com/joho/godotenv/autoload"
 
 var version = "¯\\_(ツ)_/¯"
 
@@ -19,9 +18,9 @@ const (
 
 var commands = []*cli.Command{
 	{
-		Name:   "server",
-		Usage:  "Run the server",
-		Flags:  []cli.Flag{
+		Name:  "server",
+		Usage: "Run the server",
+		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    flagAddr,
 				Usage:   "Address to listen to",
@@ -32,9 +31,9 @@ var commands = []*cli.Command{
 		Action: runServer,
 	},
 	{
-		Name:   "client",
-		Usage:  "Run the client",
-		Flags:  []cli.Flag{
+		Name:  "client",
+		Usage: "Run the client",
+		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    flagURI,
 				Usage:   "URI to connect to",

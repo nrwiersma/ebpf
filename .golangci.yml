@@ -1,0 +1,28 @@
+run:
+  tests: false
+  timeout: 5m
+  skip-dirs:
+    - bpf/dist
+    - bpf/src
+    - cmd/net
+linters:
+  enable-all: true
+  disable:
+    - errorlint
+    - exhaustive
+    - exhaustivestruct
+    - forcetypeassert
+    - forbidigo
+    - gochecknoglobals
+    - gochecknoinits
+    - godox
+    - goerr113
+    - golint
+    - gomnd
+    - interfacer
+    - noctx
+    - nlreturn
+    - maligned
+    - scopelint
+    - wrapcheck
+    - wsl
