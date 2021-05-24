@@ -4,10 +4,9 @@ import (
 	"log"
 	"os"
 
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/urfave/cli/v2"
 )
-
-import _ "github.com/joho/godotenv/autoload"
 
 var version = "¯\\_(ツ)_/¯"
 

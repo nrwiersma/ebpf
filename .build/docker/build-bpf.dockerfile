@@ -1,4 +1,4 @@
-ARG ALPINE_VERSION=3.13.3
+ARG ALPINE_VERSION=3.13.5
 
 FROM alpine:${ALPINE_VERSION}
 
@@ -12,6 +12,6 @@ RUN apk add --update \
     make \
     bash
 
-WORKDIR /src
+WORKDIR /bpf
 
 ENTRYPOINT ["make"]

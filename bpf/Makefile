@@ -1,7 +1,8 @@
 SHELL=/bin/bash -o pipefail
-DEST_DIR?=/src/dist
+SRC_DIR?=/bpf/src
+DEST_DIR?=/bpf/dist
 
-LINUX_HEADERS ?= /usr/src/linux-headers-5.10.26-0-lts
+LINUX_HEADERS ?= /usr/src/linux-headers-5.10.38-0-lts
 
 build:
 	@mkdir -p "$(DEST_DIR)"
@@ -19,7 +20,7 @@ build:
 		-I$(LINUX_HEADERS)/include/uapi \
 		-I$(LINUX_HEADERS)/include/generated/uapi \
 		-I$(LINUX_HEADERS)/include \
-		-O2 -emit-llvm -g -c metrics_sock.c \
+		-O2 -emit-llvm -g -c ${SRC_DIR}/metrics_sock.c \
 		-o - | llc -march=bpf -filetype=obj -o "${DEST_DIR}/metrics_sock.o"
 .PHONY: build
 

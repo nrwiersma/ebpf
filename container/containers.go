@@ -22,9 +22,9 @@ const (
 	Removed
 )
 
-// ContainerEvent contains information about a container
+// Event contains information about a container
 // event.
-type ContainerEvent struct {
+type Event struct {
 	Type       EventType
 	Name       string
 	CGroupPath string

@@ -13,9 +13,7 @@ import (
 
 const DefaultCgroupRoot = "/var/run/ebpf/cgroupv2"
 
-var (
-	cgroupRoot = DefaultCgroupRoot
-)
+var cgroupRoot = DefaultCgroupRoot
 
 // CgroupRoot returns the path of the cgroupv2 mount.
 func CgroupRoot() string {

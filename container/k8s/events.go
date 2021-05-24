@@ -12,20 +12,20 @@ type podEvents struct {
 	cgroupRoot string
 }
 
-func (e podEvents) AddEvents(pod *corev1.Pod) []container.ContainerEvent {
+func (e podEvents) AddEvents(pod *corev1.Pod) []container.Event {
 	if pod.Status.Phase != corev1.PodRunning {
 		return nil
 	}
 
-	return []container.ContainerEvent{{
+	return []container.Event{{
 		Type:       container.Added,
 		Name:       e.name(pod),
 		CGroupPath: e.cgroupPath(pod),
 	}}
 }
 
-func (e podEvents) UpdateEvents(_, newPod *corev1.Pod) []container.ContainerEvent {
-	evnt := container.ContainerEvent{
+func (e podEvents) UpdateEvents(_, newPod *corev1.Pod) []container.Event {
+	evnt := container.Event{
 		Name:       e.name(newPod),
 		CGroupPath: e.cgroupPath(newPod),
 	}
@@ -38,11 +38,11 @@ func (e podEvents) UpdateEvents(_, newPod *corev1.Pod) []container.ContainerEven
 	default:
 		evnt.Type = container.Removed
 	}
-	return []container.ContainerEvent{evnt}
+	return []container.Event{evnt}
 }
 
-func (e podEvents) DeleteEvents(pod *corev1.Pod) []container.ContainerEvent {
-	return []container.ContainerEvent{{
+func (e podEvents) DeleteEvents(pod *corev1.Pod) []container.Event {
+	return []container.Event{{
 		Type:       container.Removed,
 		Name:       e.name(pod),
 		CGroupPath: e.cgroupPath(pod),
@@ -61,14 +61,14 @@ type containerEvents struct {
 	cgroupRoot string
 }
 
-func (e containerEvents) AddEvents(pod *corev1.Pod) []container.ContainerEvent {
-	var events []container.ContainerEvent
+func (e containerEvents) AddEvents(pod *corev1.Pod) []container.Event {
+	events := make([]container.Event, 0, len(pod.Status.ContainerStatuses))
 	for _, cont := range pod.Status.ContainerStatuses {
 		if cont.State.Running == nil {
 			continue
 		}
 
-		events = append(events, container.ContainerEvent{
+		events = append(events, container.Event{
 			Type:       container.Added,
 			Name:       e.name(pod, cont),
 			CGroupPath: e.cgroupPath(pod, cont),
@@ -78,10 +78,10 @@ func (e containerEvents) AddEvents(pod *corev1.Pod) []container.ContainerEvent {
 	return events
 }
 
-func (e containerEvents) UpdateEvents(_, newPod *corev1.Pod) []container.ContainerEvent {
-	var events []container.ContainerEvent
+func (e containerEvents) UpdateEvents(_, newPod *corev1.Pod) []container.Event {
+	events := make([]container.Event, 0, len(newPod.Status.ContainerStatuses))
 	for _, cont := range newPod.Status.ContainerStatuses {
-		evnt := container.ContainerEvent{
+		evnt := container.Event{
 			Name:       newPod.Namespace + "/" + newPod.Name,
 			CGroupPath: e.cgroupPath(newPod, cont),
 		}
@@ -101,10 +101,10 @@ func (e containerEvents) UpdateEvents(_, newPod *corev1.Pod) []container.Contain
 	return events
 }
 
-func (e containerEvents) DeleteEvents(pod *corev1.Pod) []container.ContainerEvent {
-	var events []container.ContainerEvent
+func (e containerEvents) DeleteEvents(pod *corev1.Pod) []container.Event {
+	events := make([]container.Event, 0, len(pod.Status.ContainerStatuses))
 	for _, cont := range pod.Status.ContainerStatuses {
-		events = append(events, container.ContainerEvent{
+		events = append(events, container.Event{
 			Type:       container.Removed,
 			Name:       e.name(pod, cont),
 			CGroupPath: e.cgroupPath(pod, cont),

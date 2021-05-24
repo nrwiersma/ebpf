@@ -10,7 +10,7 @@ import (
 
 // Containers represents a container service.
 type Containers interface {
-	Events() <-chan container.ContainerEvent
+	Events() <-chan container.Event
 	Name(ip [16]byte) string
 	Close() error
 }
@@ -55,7 +55,7 @@ func (a *App) watchContainers() {
 	events := a.ctrs.Events()
 
 	for {
-		var evnt container.ContainerEvent
+		var evnt container.Event
 		select {
 		case <-a.doneCh:
 			return
